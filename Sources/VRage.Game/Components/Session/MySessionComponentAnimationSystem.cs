@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using VRage.Animations;
+using VRage.FileSystem;
 using VRage.Game.Components;
 using VRage.Game.Definitions;
 using VRage.Game.Definitions.Animation;
@@ -14,7 +15,7 @@ using VRage.Utils;
 namespace VRage.Game.SessionComponents
 {
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
-    internal class MySessionComponentAnimationSystem : MySessionComponentBase
+    public class MySessionComponentAnimationSystem : MySessionComponentBase
     {
         // Static reference to this session component.
         public static MySessionComponentAnimationSystem Static = null;
@@ -33,19 +34,30 @@ namespace VRage.Game.SessionComponents
         private readonly List<MyStateMachineNode> m_debuggingAnimControllerCurrentNodes = new List<MyStateMachineNode>(); 
         private readonly List<int[]> m_debuggingAnimControllerTreePath = new List<int[]>();
 
+        public MyEntity EntitySelectedForDebug; // override default selection = controlled object
+
+        public IEnumerable<MyAnimationControllerComponent> RegisteredAnimationComponents
+        {
+            get { return m_skinnedEntityComponents; }
+        }
+
         public override void LoadData()
         {
+            EntitySelectedForDebug = null;
             m_skinnedEntityComponents.Clear();
             m_skinnedEntityComponentsToAdd.Clear();
             m_skinnedEntityComponentsToRemove.Clear();
             MySessionComponentAnimationSystem.Static = this;
 
+#if !XB1
             if (!MySessionComponentExtDebug.Static.IsHandlerRegistered(LiveDebugging_ReceivedMessageHandler))
                 MySessionComponentExtDebug.Static.ReceivedMsg += LiveDebugging_ReceivedMessageHandler;
+#endif // !XB1
         }
 
         protected override void UnloadData()
         {
+            EntitySelectedForDebug = null;
             m_skinnedEntityComponents.Clear();
             m_skinnedEntityComponentsToAdd.Clear();
             m_skinnedEntityComponentsToRemove.Clear();
@@ -75,7 +87,9 @@ namespace VRage.Game.SessionComponents
                 skinnedEntityComp.Update();
             ProfilerShort.End();
 
+#if !XB1
             LiveDebugging();
+#endif // !XB1
         }
 
         /// <summary>
@@ -102,17 +116,17 @@ namespace VRage.Game.SessionComponents
 
         // --------------- LIVE DEBUGGING -----------------------------------------------------------------
 
+#if !XB1
         private void LiveDebugging()
         {
-            if (Session == null || Session.ControlledObject == null
-                || MySessionComponentExtDebug.Static == null || !MySessionComponentExtDebug.Static.HasClients)
+            if (Session == null || MySessionComponentExtDebug.Static == null/* || !MySessionComponentExtDebug.Static.HasClients*/)
                 return;
 
-            MyEntity localSkinnedEntity = Session.ControlledObject.Entity as MyEntity;
+            MyEntity localSkinnedEntity = EntitySelectedForDebug ?? (Session.ControlledObject != null ? Session.ControlledObject.Entity as MyEntity : null);
             if (localSkinnedEntity == null)
                 return;
             MyAnimationControllerComponent localSkinnedEntityAnimComponent = localSkinnedEntity.Components.Get<MyAnimationControllerComponent>();
-            if (localSkinnedEntityAnimComponent == null)
+            if (localSkinnedEntityAnimComponent == null || localSkinnedEntityAnimComponent.SourceId.TypeId.IsNull)
                 return;
 
             // send AC name (connect / reconnect)
@@ -221,6 +235,7 @@ namespace VRage.Game.SessionComponents
                         MyAnimationControllerDefinition originalAnimationControllerDefinition =
                             MyDefinitionManagerBase.Static.GetDefinition<MyAnimationControllerDefinition>(
                                 animSubtypeNameHash);
+
                         var postprocessor = MyDefinitionManagerBase.GetPostProcessor(typeof(MyObjectBuilder_AnimationControllerDefinition));
                         if (postprocessor != null)
                         {
@@ -257,7 +272,7 @@ namespace VRage.Game.SessionComponents
                             if (component != null && component.SourceId.SubtypeName == acName)
                             {
                                 component.Clear();
-                                component.InitFromDefinition(originalAnimationControllerDefinition); // reload from original def that was modified by postprocessor
+                                component.InitFromDefinition(originalAnimationControllerDefinition, forceReloadMwm: true); // reload from original def that was modified by postprocessor
                                 if (component.ReloadBonesNeeded != null)
                                     component.ReloadBonesNeeded();
                             }
@@ -267,6 +282,27 @@ namespace VRage.Game.SessionComponents
                 catch (Exception e)
                 {
                     MyLog.Default.WriteLine(e);
+                }
+            }
+        }
+#endif // !XB1
+        // --------------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Reload all mwm tracks while in-game. Mwms from cache are not used. 
+        /// </summary>
+        public void ReloadMwmTracks()
+        {
+            foreach (var component in m_skinnedEntityComponents)
+            {
+                MyAnimationControllerDefinition animationControllerDefinition =
+                    MyDefinitionManagerBase.Static.GetDefinition<MyAnimationControllerDefinition>(MyStringHash.GetOrCompute(component.SourceId.SubtypeName));
+                if (animationControllerDefinition != null)
+                {
+                    component.Clear();
+                    component.InitFromDefinition(animationControllerDefinition, forceReloadMwm: true); // reload from original def that was modified by postprocessor
+                    if (component.ReloadBonesNeeded != null)
+                        component.ReloadBonesNeeded();
                 }
             }
         }

@@ -14,7 +14,7 @@ using VRageMath;
 using Sandbox.Engine.Utils;
 using Sandbox.Game.Components;
 using Sandbox.Game.EntityComponents;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using Sandbox.Game.Localization;
 using VRage;
 using VRage.Game;
@@ -400,6 +400,15 @@ namespace Sandbox.Game.Entities.Blocks
 
         public MyLightingBlock()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_blinkIntervalSeconds = SyncType.CreateAndAddProp<float>();
+            m_blinkLength = SyncType.CreateAndAddProp<float>();
+            m_blinkOffset = SyncType.CreateAndAddProp<float>();
+            m_intesity = SyncType.CreateAndAddProp<float>();
+            m_lightColor = SyncType.CreateAndAddProp<Color>();
+            m_lightRadius = SyncType.CreateAndAddProp<float>();
+            m_lightFalloff = SyncType.CreateAndAddProp<float>();
+#endif // XB1
             CreateTerminalControls();
 
             this.Render = new MyRenderComponentLight();
@@ -622,11 +631,12 @@ namespace Sandbox.Game.Entities.Blocks
             m_positionDirty = true;
         }
 
-        float IMyLightingBlock.Radius { get { return Radius; } }
-        float IMyLightingBlock.ReflectorRadius { get { return ReflectorRadius; } }
-        float IMyLightingBlock.Intensity { get { return Intensity; } }
-        float IMyLightingBlock.BlinkIntervalSeconds { get { return BlinkIntervalSeconds; } }
-        float IMyLightingBlock.BlinkLenght { get { return BlinkLength;} }
-        float IMyLightingBlock.BlinkOffset { get {return BlinkOffset;} }
+        float ModAPI.Ingame.IMyLightingBlock.Radius { get { return Radius; } }
+        float ModAPI.Ingame.IMyLightingBlock.ReflectorRadius { get { return ReflectorRadius; } }
+        float ModAPI.Ingame.IMyLightingBlock.Intensity { get { return Intensity; } }
+        float ModAPI.Ingame.IMyLightingBlock.BlinkIntervalSeconds { get { return BlinkIntervalSeconds; } }
+        float ModAPI.Ingame.IMyLightingBlock.BlinkLenght { get { return BlinkLength; } }
+        float ModAPI.Ingame.IMyLightingBlock.BlinkLength { get { return BlinkLength; } }
+        float ModAPI.Ingame.IMyLightingBlock.BlinkOffset { get { return BlinkOffset; } }
     }
 }

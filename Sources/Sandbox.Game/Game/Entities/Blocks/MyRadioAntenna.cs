@@ -12,7 +12,7 @@ using Sandbox.Game.Gui;
 using VRageMath;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.World;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using Sandbox.Game.Localization;
 using VRage;
 using VRage.Game;
@@ -126,9 +126,15 @@ namespace Sandbox.Game.Entities.Cube
 
         public MyRadioAntenna()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_radius = SyncType.CreateAndAddProp<float>();
+            m_enableBroadcasting = SyncType.CreateAndAddProp<bool>();
+            m_showShipName = SyncType.CreateAndAddProp<bool>();
+#endif // XB1
             CreateTerminalControls();
 
             m_radius.ValueChanged += (obj) => ChangeRadius();
+            m_enableBroadcasting.ValueChanged += (obj) => ChangeEnableBroadcast();
         }
 
         static void CreateTerminalControls()
@@ -430,7 +436,7 @@ namespace Sandbox.Game.Entities.Cube
             RaisePropertiesChanged();
         }
 
-        float IMyRadioAntenna.Radius
+        float ModAPI.Ingame.IMyRadioAntenna.Radius
         {
             get { return GetRadius(); }
         }
@@ -440,7 +446,7 @@ namespace Sandbox.Game.Entities.Cube
 			return (RadioBroadcaster != null) ? RadioBroadcaster.WantsToBeEnabled : false;
 		}
 
-		bool IMyRadioAntenna.IsBroadcasting
+        bool ModAPI.Ingame.IMyRadioAntenna.IsBroadcasting
 		{
 			get {  return IsBroadcasting(); }
 		}

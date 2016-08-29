@@ -2,6 +2,8 @@
 using Sandbox.Engine.Physics;
 using Sandbox.Engine.Utils;
 using Sandbox.Game.Entities.Cube;
+using Sandbox.Game.Gui;
+using Sandbox.Game.Localization;
 using Sandbox.Game.Multiplayer;
 using System;
 using System.Collections.Generic;
@@ -9,49 +11,154 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Sandbox.Common.ObjectBuilders;
+using Sandbox.Definitions;
+using Sandbox.Engine.Multiplayer;
+using Sandbox.Game.Replication;
+using Sandbox.Game.World;
 using VRage;
+using VRage.Game;
 using VRage.Game.Entity;
 using VRage.ModAPI;
+using VRage.ObjectBuilders;
+using VRage.Utils;
 using VRageMath;
+#if XB1 // XB1_SYNC_SERIALIZER_NOEMIT
+using System.Reflection;
+using VRage.Reflection;
+#endif // XB1
 
 namespace Sandbox.Game.Entities.Blocks
 {
     abstract public class MyMechanicalConnectionBlockBase : MyFunctionalBlock
     {
+#if !XB1 // XB1_SYNC_SERIALIZER_NOEMIT
         protected struct State
+#else // XB1
+        protected struct State : IMySetGetMemberDataHelper
+#endif // XB1
         {
+            /// <summary>
+            /// <para>No value - detached </para>
+            /// <para>0 - try to attach </para>
+            /// </summary>
             public long? TopBlockId;
             public MyDeltaTransform? MasterToSlave;
             public bool Force;
+            public bool Welded;
+
+#if XB1 // XB1_SYNC_SERIALIZER_NOEMIT
+            public object GetMemberData(MemberInfo m)
+            {
+                if (m.Name == "TopBlockId")
+                    return TopBlockId;
+                if (m.Name == "MasterToSlave")
+                    return MasterToSlave;
+                if (m.Name == "Force")
+                    return Force;
+                if (m.Name == "Welded")
+                    return Welded;
+
+                System.Diagnostics.Debug.Assert(false, "TODO for XB1.");
+                return null;
+            }
+#endif // XB1
         }
 
-        protected readonly Sync<long?> m_weldedEntityId;
         protected readonly Sync<State> m_connectionState;
+        protected readonly Sync<bool> m_topAndBottomSamePhysicsBody;
 
         protected MyCubeGrid m_topGrid;
         protected MyAttachableTopBlockBase m_topBlock;
 
-        protected bool m_welded = false;
-        protected long? m_weldedTopBlockId;
-        protected bool m_isWelding = false;
-        protected Sync<bool> m_forceWeld;
+        MyAttachableTopBlockBase m_topBlockToReattach;
 
-        protected Sync<float> m_weldSpeedSq; //squared
+        protected bool m_isWelding = false;
+        private Sync<bool> m_forceWeld;
+        private Sync<bool> m_speedWeld;
+
+        protected bool m_welded = false;
+
+        private Sync<float> m_weldSpeedSq; //squared
 
         protected bool m_isAttached = false;
-
+        bool m_forceApply = false;
         protected static List<HkBodyCollision> m_penetrations = new List<HkBodyCollision>();
         protected static HashSet<MySlimBlock> m_tmpSet = new HashSet<MySlimBlock>();
 
+        protected HkConstraint m_constraint;
+
         public MyMechanicalConnectionBlockBase()
         {
-            m_weldedEntityId.ValidateNever();
-            m_weldedEntityId.ValueChanged += (o) => OnWeldedEntityIdChanged();
-            m_forceWeld.ValueChanged += (o) => OnWeldedEntityIdChanged();
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_connectionState = SyncType.CreateAndAddProp<State>();
+            m_topAndBottomSamePhysicsBody = SyncType.CreateAndAddProp<bool>();
+            m_forceWeld = SyncType.CreateAndAddProp<bool>();
+            m_speedWeld = SyncType.CreateAndAddProp<bool>();
+            m_weldSpeedSq = SyncType.CreateAndAddProp<float>();
+#endif // XB1
+
+            m_forceWeld.ValueChanged += (o) => OnForceWeldChanged();
             m_connectionState.ValueChanged += (o) => OnAttachTargetChanged();
             m_connectionState.Validate = ValidateTopBlockId;
+            m_topAndBottomSamePhysicsBody.ValidateNever();
+
+            m_speedWeld.Value = false;
+            CreateTerminalControls();     
         }
 
+        static void CreateTerminalControls()
+        {
+            if (MyTerminalControlFactory.AreControlsCreated<MyMechanicalConnectionBlockBase>())
+                return;
+
+            var weldSpeed = new MyTerminalControlSlider<MyMechanicalConnectionBlockBase>("Weld speed", MySpaceTexts.BlockPropertyTitle_WeldSpeed, MySpaceTexts.Blank);
+            weldSpeed.SetLimits((block) => 0f, (block) => MyGridPhysics.SmallShipMaxLinearVelocity());
+            weldSpeed.DefaultValueGetter = (block) => MyGridPhysics.LargeShipMaxLinearVelocity() - 5f;
+            weldSpeed.Getter = (x) => (float)Math.Sqrt(x.m_weldSpeedSq);
+            weldSpeed.Setter = (x, v) => x.m_weldSpeedSq.Value = v * v;
+            weldSpeed.Writer = (x, res) => res.AppendDecimal((float)Math.Sqrt(x.m_weldSpeedSq), 1).Append("m/s");
+            weldSpeed.EnableActions();
+            MyTerminalControlFactory.AddControl(weldSpeed);
+
+            var weldForce = new MyTerminalControlCheckbox<MyMechanicalConnectionBlockBase>("Force weld", MySpaceTexts.BlockPropertyTitle_WeldForce, MySpaceTexts.Blank);
+            weldForce.Getter = (x) => x.m_forceWeld;
+            weldForce.Setter = (x, v) => x.m_forceWeld.Value = v;
+            weldForce.EnableAction();
+            MyTerminalControlFactory.AddControl(weldForce);
+        }
+
+        public override void Init(MyObjectBuilder_CubeBlock objectBuilder, MyCubeGrid cubeGrid)
+        {
+            base.Init(objectBuilder, cubeGrid);
+
+            var ob = objectBuilder as MyObjectBuilder_MechanicalConnectionBlock;
+            m_weldSpeedSq.Value = ob.WeldSpeed * ob.WeldSpeed;
+            m_forceWeld.Value = ob.ForceWeld;
+
+            if (ob.TopBlockId.HasValue && ob.TopBlockId.Value != 0)
+            {
+                MyDeltaTransform? deltaTransform = ob.MasterToSlaveTransform.HasValue ? ob.MasterToSlaveTransform.Value : (MyDeltaTransform?)null;
+                m_connectionState.Value = new State() { TopBlockId = ob.TopBlockId, MasterToSlave = deltaTransform, Welded = ob.IsWelded || ob.ForceWeld };
+            }
+
+            CubeGrid.OnPhysicsChanged += cubeGrid_OnPhysicsChanged;
+        }
+
+        public override MyObjectBuilder_CubeBlock GetObjectBuilderCubeBlock(bool copy = false)
+        {
+            var ob = base.GetObjectBuilderCubeBlock(copy) as MyObjectBuilder_MechanicalConnectionBlock;
+
+            ob.WeldSpeed = (float)Math.Sqrt(m_weldSpeedSq);
+            ob.ForceWeld = m_forceWeld;
+            if(!Sync.IsServer) //server has the correct positions
+                ob.MasterToSlaveTransform = m_connectionState.Value.MasterToSlave.HasValue ? m_connectionState.Value.MasterToSlave.Value : (MyPositionAndOrientation?)null;
+
+            ob.TopBlockId = m_connectionState.Value.TopBlockId;
+            ob.IsWelded = m_connectionState.Value.Welded;
+
+            return ob;
+        }
 
         bool ValidateTopBlockId(State newState)
         {
@@ -63,69 +170,122 @@ namespace Sandbox.Game.Entities.Blocks
                 return false;
         }
 
-        void OnWeldedEntityIdChanged()
+        void OnForceWeldChanged()
         {
-            NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
+            if(Sync.IsServer == false)
+            {
+                m_forceApply = m_connectionState.Value.Force;
+                return;
+            }
+
+            if (m_forceWeld.Value)
+            {
+                if (m_welded == false && m_topBlock != null)
+                {
+                    WeldGroup(true);
+                    UpdateText();
+                }
+            }
+            else if (m_welded && m_speedWeld == false)
+            {
+                UnweldGroup();
+                m_forceApply = true;
+                TryAttach();
+                UpdateText();
+            }
         }
 
         void OnAttachTargetChanged()
         {
-            NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
             UpdateText();
+            NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
+            if (Sync.IsServer == false)
+            {
+                m_forceApply = m_connectionState.Value.Force;
+            }
         }
 
         protected bool CheckVelocities()
-        {
-            if (m_forceWeld && m_topBlock == null && m_weldedEntityId.Value.HasValue)
+        {              
+            if (!MyFakes.WELD_ROTORS || Sync.IsServer == false || m_forceWeld || CubeGrid == null || CubeGrid.Physics == null)
+                return false;
+
+            var velSq = CubeGrid.Physics.LinearVelocity.LengthSquared();
+
+            const float safeUnweldSpeedDif = 2 * 2;
+            if (velSq < m_weldSpeedSq - safeUnweldSpeedDif && m_welded)
             {
-                if (MyEntities.TryGetEntityById<MyAttachableTopBlockBase>(m_weldedEntityId.Value.Value, out m_topBlock))
-                {
-                    m_topGrid = m_topBlock.CubeGrid;
-                }
+                m_speedWeld.Value = false;
+                UnweldGroup();
+                m_forceApply = true;
+                TryAttach();
             }
 
-            if (!MyFakes.WELD_ROTORS || Sync.IsServer == false)
-                return false;
+            if (m_welded)
+            {
+                return true;
+            }
+
+            if (velSq > m_weldSpeedSq && m_topGrid == null)
+            {
+                TryGetTop();
+            }
 
             if (m_topBlock == null || m_topGrid == null || m_topGrid.Physics == null)
                 return false;
 
-            var velSq = CubeGrid.Physics.LinearVelocity.LengthSquared();
-            if (m_forceWeld || velSq > m_weldSpeedSq)
+            if (velSq > m_weldSpeedSq)
             {
                 if (m_welded)
                 {
                     return true;
                 }
 
-                if (m_topBlock != null && m_topGrid != null && MyWeldingGroups.Static.GetGroup(CubeGrid) != MyWeldingGroups.Static.GetGroup(m_topGrid))
+                if (m_topBlock != null && m_topGrid != null)
                 {
-                    WeldGroup();
+                    m_speedWeld.Value = true;
+                    WeldGroup(false);
                     return true;
                 }
                 return false;
             }
-
-            const float safeUnweldSpeedDif = 2 * 2;
-            if (!m_forceWeld && velSq < m_weldSpeedSq - safeUnweldSpeedDif && m_welded)
-            {
-                UnweldGroup();
-            }
-            if (m_welded)
-                return true;
             return false;
         }
 
-        private void WeldGroup()
+        private void TryGetTop()
         {
-            var topGrid = m_topGrid;
+            if (m_connectionState.Value.TopBlockId.HasValue)
+            {
+                if (MyEntities.TryGetEntityById<MyAttachableTopBlockBase>(m_connectionState.Value.TopBlockId.Value, out m_topBlock))
+                {
+                    m_topGrid = m_topBlock.CubeGrid;
+                    if (m_topGrid != null)
+                    {
+                        if (m_connectionState.Value.MasterToSlave.HasValue)
+                        {
+                            m_topGrid.WorldMatrix = MatrixD.Multiply(m_connectionState.Value.MasterToSlave.Value, this.WorldMatrix);
+                        }
+                    }
+                }
+                else if (Sync.IsServer)
+                {
+                    m_connectionState.Value = new State() { TopBlockId = 0};
+                }
+            }
+        }
+
+        private void WeldGroup(bool force)
+        {
             var topBlock = m_topBlock;
+            MyCubeGrid topGrid = m_topBlock.CubeGrid;
 
             m_isWelding = true;
 
-            m_weldedTopBlockId = m_topBlock.EntityId;
+            if (m_isAttached)
+            {
+                Detach(false);
+            }
 
-            Detach(false);
             MyWeldingGroups.Static.CreateLink(EntityId, CubeGrid, topGrid);
 
             if (MyCubeGridGroups.Static.GetGroups(GridLinkTypeEnum.Physical).LinkExists(EntityId, CubeGrid, topGrid) == false)
@@ -141,14 +301,16 @@ namespace Sandbox.Game.Entities.Blocks
             if (Sync.IsServer)
             {
                 MatrixD masterToSlave = topBlock.CubeGrid.WorldMatrix * MatrixD.Invert(WorldMatrix);
-
-                m_connectionState.Value = new State() { TopBlockId = m_weldedTopBlockId, MasterToSlave = masterToSlave };
-                m_weldedEntityId.Value = m_weldedTopBlockId;
+                m_connectionState.Value = new State() { TopBlockId = topBlock.EntityId, MasterToSlave = masterToSlave, Welded = true,Force = force};
+               
             }
 
+            topBlock.Attach(this);
+            topBlock.CubeGrid.OnPhysicsChanged += cubeGrid_OnPhysicsChanged;
+
+            m_welded = true;
             m_topGrid = topGrid;
             m_topBlock = topBlock;
-            m_welded = true;
 
             m_isWelding = false;
             RaisePropertiesChanged();
@@ -159,48 +321,40 @@ namespace Sandbox.Game.Entities.Blocks
             if (m_welded)
             {
                 m_isWelding = true;
+                var topGrid = m_topBlock.CubeGrid;
 
-                if (Sync.IsServer)
+                MyWeldingGroups.Static.BreakLink(EntityId, CubeGrid, topGrid);
+
+                if (MyCubeGridGroups.Static.GetGroups(GridLinkTypeEnum.Physical).LinkExists(EntityId, CubeGrid, topGrid))
                 {
-                    m_weldedEntityId.Value = null;
+                    OnConstraintRemoved(GridLinkTypeEnum.Physical, topGrid);
                 }
 
-                m_weldedTopBlockId = null;
-
-                MyWeldingGroups.Static.BreakLink(EntityId, CubeGrid, m_topGrid);
-
-
-                if (MyCubeGridGroups.Static.GetGroups(GridLinkTypeEnum.Physical).LinkExists(EntityId, CubeGrid, m_topGrid))
+                if (MyCubeGridGroups.Static.GetGroups(GridLinkTypeEnum.Logical).LinkExists(EntityId, CubeGrid, topGrid))
                 {
-                    OnConstraintRemoved(GridLinkTypeEnum.Physical, m_topGrid);
+                    OnConstraintRemoved(GridLinkTypeEnum.Logical, topGrid);
                 }
 
-                if (MyCubeGridGroups.Static.GetGroups(GridLinkTypeEnum.Logical).LinkExists(EntityId, CubeGrid, m_topGrid))
-                {
-                    OnConstraintRemoved(GridLinkTypeEnum.Logical, m_topGrid);
-                }
-
-                if (CanAttach(m_topBlock))
-                {
-                    Attach(m_topBlock, false);
-                }
-
+                m_connectionState.Value = new State() { TopBlockId = m_topBlock.EntityId, Welded = false, Force = false};
+                CustomUnweld();
                 m_welded = false;
                 m_isWelding = false;
                 RaisePropertiesChanged();
             }
         }
 
-        protected void CubeGrid_OnGridSplit(MyCubeGrid grid1, MyCubeGrid grid2)
+        private void CubeGrid_OnGridSplit(MyCubeGrid grid1, MyCubeGrid grid2)
         {
             OnGridSplit();
         }
 
         public void OnGridSplit()
         {
+            m_topAndBottomSamePhysicsBody.Value = false;
             if (m_welded && m_isWelding == false)
             {
                 UnweldGroup();
+                WeldGroup(true);
             }
             else
             {
@@ -214,9 +368,13 @@ namespace Sandbox.Game.Entities.Blocks
 
             if (Sync.IsServer)
             {
+                if (m_topBlock != null)
+                {
+                    m_topBlockToReattach = m_topBlock;
+                    Detach(true);
+                }
                 CubeGrid.OnGridSplit -= CubeGrid_OnGridSplit;
             }
-            Detach(true);
         }
 
         public override void OnRegisteredToGridSystems()
@@ -226,43 +384,121 @@ namespace Sandbox.Game.Entities.Blocks
             if (Sync.IsServer)
             {
                 CubeGrid.OnGridSplit += CubeGrid_OnGridSplit;
+
+                if (CubeGrid.Physics != null)
+                {
+                    TryAttach();
+                }
             }
-            TryAttach();
         }
 
-        protected void TryWeld()
+        private void TryForceWeldServer()
         {
-            if (m_weldedEntityId.Value == null)
+            if(m_topBlockToReattach != null && m_forceWeld)
+            {
+                m_topBlock = m_topBlockToReattach;
+                m_topGrid = m_topBlock.CubeGrid;
+                m_topBlockToReattach = null;
+            }
+
+            if (m_topBlock == null && (m_connectionState.Value.TopBlockId.HasValue))
+            {
+                TryGetTop();
+                NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
+                return;
+            }
+
+            if (m_topBlock != null)
+            {
+                if (m_forceWeld || m_speedWeld)
+                {
+                    if (m_welded == false)
+                    {
+                        WeldGroup(false);
+                        UpdateText();
+                    }
+                }
+                else if (m_welded)
+                {
+                    UnweldGroup();
+                    m_forceApply = true;
+                    TryAttach();
+                    UpdateText();
+                }
+            }
+
+        }
+
+        private void TryWeldClient()
+        {
+            if (m_forceApply && m_welded)
+            {
+                UnweldGroup();
+                UpdateText();
+            }
+
+            if (m_connectionState.Value.Welded == false)
             {
                 if (m_welded)
                 {
                     UnweldGroup();
+                    UpdateText();
                 }
             }
-            else if (m_weldedEntityId.Value != m_weldedTopBlockId && m_topBlock != null)
+            else if (m_connectionState.Value.Welded == true && (m_welded == false || m_topBlock == null || m_topBlock.EntityId != m_connectionState.Value.TopBlockId))
             {
-                WeldGroup();
+                if (m_topBlock == null)
+                {
+                    TryGetTop();
+                    NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
+                    return;
+                }
+
+                if (m_topBlock != null)
+                {
+                    WeldGroup(false);
+                    m_forceApply = false;
+                    UpdateText();
+                }
+                else
+                {
+                    NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME;
+                }
+            }
+        }
+
+        protected void TryWeld()
+        {
+            if (Sync.IsServer)
+            {
+                TryForceWeldServer();
+            }
+            else
+            {
+                TryWeldClient();
             }
         }
 
         public void SyncDetach()
         {
-            m_connectionState.Value = new State() { TopBlockId = 0, MasterToSlave = null };
+            m_connectionState.Value = new State() { TopBlockId = 0};
             NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
         }
 
         public virtual bool Detach(bool updateGroup = true)
         {
-            if (m_isWelding == false && m_welded)
+            var tmptopGrid = m_topBlock == null ? null: m_topBlock.CubeGrid;
+            if (m_connectionState.Value.Welded || m_welded)
             {
                 UnweldGroup();
             }
-
-            var tmptopGrid = m_topGrid;
-            if (updateGroup && m_topGrid != null && (m_welded == false || m_isWelding == false))
+            else
             {
-                OnConstraintRemoved(GridLinkTypeEnum.Physical, tmptopGrid);
-                OnConstraintRemoved(GridLinkTypeEnum.Logical, tmptopGrid);
+                if (updateGroup && tmptopGrid != null && (m_connectionState.Value.Welded == false || m_isWelding == false))
+                {
+                    OnConstraintRemoved(GridLinkTypeEnum.Physical, tmptopGrid);
+                    OnConstraintRemoved(GridLinkTypeEnum.Logical, tmptopGrid);
+                }
             }
 
             //Debug.Assert(m_topGrid != null);
@@ -271,19 +507,19 @@ namespace Sandbox.Game.Entities.Blocks
      
             if (m_topBlock != null)
             {
-                m_topBlock.Detach(m_welded || m_isWelding);          
+                m_topBlock.Detach(m_connectionState.Value.Welded || m_isWelding);         
+ 
+                if(updateGroup)
+                {
+                    tmptopGrid.OnPhysicsChanged -= cubeGrid_OnPhysicsChanged;     
+                    if (Sync.IsServer)
+                    {                       
+                        m_connectionState.Value = new State() { TopBlockId = 0, Welded = false };
+                    }
+                }
             }
 
-            if (updateGroup && tmptopGrid != null)
-            {
-                tmptopGrid.OnPhysicsChanged -= cubeGrid_OnPhysicsChanged;
-            }
-
-            if (updateGroup && Sync.IsServer)
-            {
-                m_connectionState.Value = new State() { TopBlockId = 0};
-            }
-
+           
             m_topGrid = null;
             m_topBlock = null;
             m_isAttached = false;
@@ -294,15 +530,102 @@ namespace Sandbox.Game.Entities.Blocks
 
         protected abstract void DisposeConstraint();
 
-        protected abstract bool Attach(MyAttachableTopBlockBase rotor, bool updateGroup = true);
+        protected virtual bool Attach(MyAttachableTopBlockBase topBlock, bool updateGroup = true)
+        {
+            if (topBlock.CubeGrid.Physics == null)
+                return false;
+
+            if (CubeGrid.Physics != null && CubeGrid.Physics.Enabled)
+            {
+                m_topBlock = topBlock;
+                m_topGrid = m_topBlock.CubeGrid;
+
+                if (updateGroup)
+                {
+                    OnConstraintAdded(GridLinkTypeEnum.Physical, m_topGrid);
+                    OnConstraintAdded(GridLinkTypeEnum.Logical, m_topGrid);
+                    m_topGrid.OnPhysicsChanged += cubeGrid_OnPhysicsChanged;
+                }
+
+                if (CubeGrid.Physics.RigidBody == m_topGrid.Physics.RigidBody)
+                {                
+                    if (m_welded)
+                    {
+                        m_isAttached = true;
+                        return true;
+                    }
+                    else 
+                    {
+                        m_topAndBottomSamePhysicsBody.Value = true;
+                        m_isAttached = false;
+                        return false;
+                    }
+                }
+                else
+                {
+                    m_topAndBottomSamePhysicsBody.Value = false;
+                }
+
+
+                if (m_connectionState.Value.MasterToSlave.HasValue)
+                {
+                    m_topBlock.CubeGrid.WorldMatrix = MatrixD.Multiply(m_connectionState.Value.MasterToSlave.Value, this.WorldMatrix);
+                }
+
+                return true;
+            }
+            return m_welded;
+        }
+
+        private void FindTopServer(MyEntityUpdateEnum updateFlags)
+        {
+            MyAttachableTopBlockBase top = null;
+            if (m_topBlockToReattach != null)
+            {
+                top = m_topBlockToReattach;
+            }
+            else
+            {
+                top = FindMatchingTop();
+            }
+
+            if (top != null)
+            {
+                if (CanDetach())
+                {
+                    Detach();
+                }
+
+                if (TryAttach(top))
+                {
+                    m_topBlockToReattach = null;
+                }
+                else
+                {
+                    updateFlags |= MyEntityUpdateEnum.EACH_10TH_FRAME;
+                }
+
+            }
+            else
+            {
+                updateFlags |= MyEntityUpdateEnum.EACH_10TH_FRAME;
+            }
+        }
 
         protected void TryAttach()
-        {
-            if (!CubeGrid.InScene || CubeGrid.Physics == null || CubeGrid.Physics.RigidBody == null || CubeGrid.Physics.RigidBody.InWorld == false)
-                return;
+        {        
             var updateFlags = NeedsUpdate;
             updateFlags &= ~MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
             updateFlags &= ~MyEntityUpdateEnum.EACH_10TH_FRAME;
+
+            if(m_welded || m_forceWeld || m_speedWeld)
+            {
+                if (m_welded)
+                {
+                    NeedsUpdate = updateFlags;
+                }
+                return;
+            }
 
             if (m_connectionState.Value.TopBlockId.HasValue == false) // Detached
             {
@@ -313,78 +636,73 @@ namespace Sandbox.Game.Entities.Blocks
             }
             else if (m_connectionState.Value.TopBlockId == 0) // Find anything to attach (only on server)
             {
+                //nothing to do for client in this case
                 if (Sync.IsServer)
                 {
-                    var top = FindMatchingTop();
-                    if (top != null)
-                    {
-                        if (CanDetach())
-                        {
-                            Detach();
-                        }
-
-                        if (CanAttach(top))
-                        {
-                            MatrixD masterToSlave = top.CubeGrid.WorldMatrix * MatrixD.Invert(WorldMatrix);
-                            m_connectionState.Value = new State() { TopBlockId = top.EntityId, MasterToSlave = masterToSlave };
-                            Attach(top);
-                        }
-                    }
-                    else
-                    {
-                        updateFlags |= MyEntityUpdateEnum.EACH_10TH_FRAME;
-                    }
+                    FindTopServer(updateFlags);
                 }
+               
             }
-            else if (m_connectionState.Value.TopBlockId.HasValue && ((false == m_welded && (m_connectionState.Value.Force || m_topBlock == null || m_topBlock.EntityId != m_connectionState.Value.TopBlockId)) ||
-                     (m_welded && m_weldedTopBlockId != m_connectionState.Value.TopBlockId))) // Attached to something else or nothing
+            else if (m_topAndBottomSamePhysicsBody == false && m_connectionState.Value.TopBlockId.HasValue &&
+                    (m_isAttached == false || m_forceApply || m_topBlock == null || m_topBlock.EntityId != m_connectionState.Value.TopBlockId))
             {
-                if (m_topBlock != null || m_welded)
+
+                long topBlockId = m_connectionState.Value.TopBlockId.Value;
+                if (m_topBlock != null && m_isAttached)
                 {
                     Detach();
                 }
 
-                MyAttachableTopBlockBase top;
                 bool attached = false;
-                if (MyEntities.TryGetEntityById<MyAttachableTopBlockBase>(m_connectionState.Value.TopBlockId.Value, out top) && !top.MarkedForClose && top.CubeGrid.InScene && top.CubeGrid.Physics.IsInWorld)
+                MyAttachableTopBlockBase top;
+                if (MyEntities.TryGetEntityById<MyAttachableTopBlockBase>(topBlockId, out top))
                 {
-                    if (Sync.IsServer == false)
+                    if (TryAttach(top))
                     {
-                        if (m_connectionState.Value.MasterToSlave.HasValue)
-                        {
-                            top.CubeGrid.WorldMatrix = MatrixD.Multiply(m_connectionState.Value.MasterToSlave.Value, this.WorldMatrix);
-                        }
-                    }
-                    else
-                    {
-                        MatrixD masterToSlave = top.CubeGrid.WorldMatrix * MatrixD.Invert(WorldMatrix);
-                        m_connectionState.Value = new State() { TopBlockId = top.EntityId, MasterToSlave = masterToSlave };
-                    }
-                    if (CanAttach(top))
-                    {
-                        attached = Attach(top);
+                        attached = true;
+                        m_forceApply = false;
                     }
                 }
 
-                if (!attached)
+                if (attached == false && m_topAndBottomSamePhysicsBody == false)
                 {
-                    // Rotor not found by EntityId or not in scene, try again in 10 frames
+                    // top not found by EntityId or not in scene, try again in 10 frames
                     updateFlags |= MyEntityUpdateEnum.EACH_10TH_FRAME;
+
+                    if (m_forceApply)
+                    {
+                        updateFlags |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
+                    }
                 }
             }
             NeedsUpdate = updateFlags;
             RefreshConstraint();
         }
 
+        private bool TryAttach(MyAttachableTopBlockBase top)
+        {
+            bool attached = false;
+            if (CanAttach(top))
+            {
+                attached = Attach(top);
+                if ((attached || m_topAndBottomSamePhysicsBody) && Sync.IsServer)
+                {
+                    MatrixD masterToSlave = top.CubeGrid.WorldMatrix * MatrixD.Invert(WorldMatrix);
+                    m_connectionState.Value = new State() { TopBlockId = top.EntityId, MasterToSlave = masterToSlave, Welded = m_welded};
+                }
+            }
+            return attached;
+        }
+
         bool CanAttach(MyAttachableTopBlockBase top)
         {
-            bool closed = MarkedForClose || Closed || CubeGrid.MarkedForClose || CubeGrid.Closed;
+            bool closed = MarkedForClose || CubeGrid.MarkedForClose;
             if(closed)
             {
                 return false;
             }
 
-            bool topClosed = top.MarkedForClose || top.Closed || top.CubeGrid.MarkedForClose || top.CubeGrid.Closed;
+            bool topClosed = top.MarkedForClose || top.CubeGrid.MarkedForClose;
 
             if(topClosed)
             {
@@ -400,17 +718,21 @@ namespace Sandbox.Game.Entities.Blocks
             }
 
             bool topNotInWorld = top.CubeGrid.Physics == null || top.CubeGrid.Physics.RigidBody == null ||
-                CubeGrid.Physics.RigidBody.InWorld == false;
+                top.CubeGrid.Physics.RigidBody.InWorld == false;
 
             if(topNotInWorld)
             {
                 return false;
             }
 
+            if(top.CubeGrid.Physics.HavokWorld != CubeGrid.Physics.HavokWorld)
+            {
+                return false;
+            }
             return true;
         }
 
-        protected MyAttachableTopBlockBase FindMatchingTop()
+        private MyAttachableTopBlockBase FindMatchingTop()
         {
             Debug.Assert(CubeGrid != null);
             Debug.Assert(m_penetrations != null);
@@ -465,7 +787,11 @@ namespace Sandbox.Game.Entities.Blocks
                             }
                         }
                     }
-                }
+                }          
+            }
+            catch(Exception ex)
+            {
+
             }
             finally
             {
@@ -505,6 +831,7 @@ namespace Sandbox.Game.Entities.Blocks
         public override void OnRemovedFromScene(object source)
         {
             base.OnRemovedFromScene(source);
+            m_topBlockToReattach = m_topBlock;
             Detach(true);
             CubeGrid.OnPhysicsChanged -= cubeGrid_OnPhysicsChanged;
         }
@@ -513,15 +840,20 @@ namespace Sandbox.Game.Entities.Blocks
         {
             CubeGrid.OnPhysicsChanged -= cubeGrid_OnPhysicsChanged;
             Detach();
+            m_topBlockToReattach = null;
             base.Closing();
         }
 
-        protected void cubeGrid_OnPhysicsChanged(MyEntity obj)
+        private void cubeGrid_OnPhysicsChanged(MyEntity obj)
         {
             cubeGrid_OnPhysicsChanged();
             if (Sync.IsServer)
             {
-                Reattach();
+                m_topAndBottomSamePhysicsBody.Value = false;
+                if (m_welded == false && m_isWelding == false)
+                {
+                    Reattach();
+                }
             }
         }
 
@@ -529,17 +861,7 @@ namespace Sandbox.Game.Entities.Blocks
 
         public void Reattach(bool force = false)
         {
-            if (m_topBlock == null || m_topBlock.Closed)
-            {
-                return;
-            }
-
-            if (m_isWelding)
-            {
-                return;
-            }
-
-            if (force == false &&m_welded)
+            if (m_isWelding || m_welded || m_topBlock == null || m_topBlock.Closed)
             {
                 return;
             }
@@ -554,17 +876,39 @@ namespace Sandbox.Game.Entities.Blocks
 
             if (CanAttach(top))
             {
-                if (Sync.IsServer)
+                m_topBlock = top;
+                m_topGrid = top.CubeGrid;
+
+                bool attached = Attach(top, force);
+
+                if (attached && Sync.IsServer)
                 {
                     MatrixD masterToSlave = top.CubeGrid.WorldMatrix * MatrixD.Invert(WorldMatrix);
                     m_connectionState.Value = new State() { TopBlockId = top.EntityId, MasterToSlave = masterToSlave, Force = force };
                 }
 
-                bool attached = Attach(top, force);
-
                 //Debug.Assert(detached && attached);
                 if (!top.MarkedForClose && top.CubeGrid.Physics != null)
+                {
                     top.CubeGrid.Physics.ForceActivate();
+                }
+            }
+            else
+            {
+                if (MyCubeGridGroups.Static.GetGroups(GridLinkTypeEnum.Physical).LinkExists(EntityId, CubeGrid, top.CubeGrid))
+                {
+                    OnConstraintRemoved(GridLinkTypeEnum.Physical, top.CubeGrid);
+                }
+
+                if (MyCubeGridGroups.Static.GetGroups(GridLinkTypeEnum.Logical).LinkExists(EntityId, CubeGrid, top.CubeGrid))
+                {
+                    OnConstraintRemoved(GridLinkTypeEnum.Logical, top.CubeGrid);
+                }
+
+                if (Sync.IsServer && top != null)
+                {
+                    top.Attach(this);
+                }
             }
         }
 
@@ -572,11 +916,6 @@ namespace Sandbox.Game.Entities.Blocks
         {
             base.OnAddedToScene(source);
             NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
-
-            if (m_welded || m_isWelding)
-            {
-                UnweldGroup();
-            }
         }
 
         protected void CreateTopGrid(long builtBy)
@@ -591,15 +930,135 @@ namespace Sandbox.Game.Entities.Blocks
            }
         }
 
-        protected abstract void CreateTopGrid(out MyCubeGrid topGrid, out MyAttachableTopBlockBase topBlock, long ownerId);
+        protected virtual bool CanPlaceRotor(MyAttachableTopBlockBase rotorBlock, long builtBy)
+        {
+            return true;
+        }
+
+        public void ReattachTop(MyAttachableTopBlockBase top)
+        {
+            if (m_topBlock != null || m_welded)
+            {
+                Detach();
+            }
+
+            m_topBlockToReattach = top;
+            // Rotor not found by EntityId or not in scene, try again in 10 frames
+            NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
+
+        }
+
+        protected void RefreshConstraint()
+        {
+            if (m_constraint != null && !m_constraint.InWorld)
+            {
+                var oldState = m_connectionState.Value;
+                Detach();
+                m_connectionState.Value = oldState;
+                NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME;
+              
+            }
+        }
+
+        protected bool CanDetach()
+        {
+            return m_constraint != null;
+        }
+
+        private void CreateTopGrid(out MyCubeGrid topGrid, out MyAttachableTopBlockBase topBlock, long ownerId)
+        {
+            CreateTopGrid(out topGrid, out topBlock, ownerId,MyDefinitionManager.Static.TryGetDefinitionGroup(((MyMechanicalConnectionBlockBaseDefinition)BlockDefinition).TopPart) );
+        }
+
+        private void CreateTopGrid(out MyCubeGrid topGrid, out MyAttachableTopBlockBase topBlock, long builtBy, MyCubeBlockDefinitionGroup topGroup)
+        {
+            if (topGroup == null)
+            {
+                topGrid = null;
+                topBlock = null;
+                return;
+            }
+
+            var gridSize = CubeGrid.GridSizeEnum;
+
+            float size = MyDefinitionManager.Static.GetCubeSize(gridSize);
+            var matrix = GetTopGridMatrix();
+
+            var definition = topGroup[gridSize];
+            Debug.Assert(definition != null);
+
+            var block = MyCubeGrid.CreateBlockObjectBuilder(definition, Vector3I.Zero, MyBlockOrientation.Identity, MyEntityIdentifier.AllocateId(), OwnerId, fullyBuilt: MySession.Static.CreativeMode);
+
+            var gridBuilder = MyObjectBuilderSerializer.CreateNewObject<MyObjectBuilder_CubeGrid>();
+            gridBuilder.GridSizeEnum = gridSize;
+            gridBuilder.IsStatic = false;
+            gridBuilder.PositionAndOrientation = new MyPositionAndOrientation(matrix);
+            gridBuilder.CubeBlocks.Add(block);
+
+            var grid = MyEntityFactory.CreateEntity<MyCubeGrid>(gridBuilder);
+            grid.Init(gridBuilder);
+
+            topGrid = grid;
+            topBlock = (MyAttachableTopBlockBase)topGrid.GetCubeBlock(Vector3I.Zero).FatBlock;
+
+            if (!CanPlaceTop(topBlock, builtBy))
+            {
+                topGrid = null;
+                topBlock = null;
+                grid.Close();
+                return;
+            }
+            //topGrid.SetPosition(topGrid.WorldMatrix.Translation - (topBlock.WorldMatrix.Translation/*Vector3.Transform(topBlock.DummyPosLoc, topGrid.WorldMatrix) - topGrid.WorldMatrix.Translation*/));
+
+            MyEntities.Add(grid);
+            if (MyFakes.ENABLE_SENT_GROUP_AT_ONCE)
+            {
+                MyMultiplayer.ReplicateImmediatelly(MyExternalReplicable.FindByObject(grid), MyExternalReplicable.FindByObject(CubeGrid));
+            }
+
+            MatrixD masterToSlave = topBlock.CubeGrid.WorldMatrix * MatrixD.Invert(WorldMatrix);
+            m_connectionState.Value = new State() { TopBlockId = topBlock.EntityId, MasterToSlave = masterToSlave};
+        }
+
+        protected abstract MatrixD GetTopGridMatrix();
+
+        protected virtual bool CanPlaceTop(MyAttachableTopBlockBase topBlock, long builtBy)
+        {
+            return true;
+        }
 
         protected virtual void UpdateText()
         {
 
         }
 
-        protected abstract bool CanDetach();
+        public MyStringId GetAttachState()
+        {
+            if ((m_welded || m_isWelding) && SafeConstraint == null)
+            {
+                return MySpaceTexts.BlockPropertiesText_MotorLocked;
+            }
+            else if (m_topAndBottomSamePhysicsBody.Value)
+            {
+                return MySpaceTexts.BlockPropertiesText_MotorAttached;
+            }
+            else if (m_connectionState.Value.TopBlockId == null)
+                return MySpaceTexts.BlockPropertiesText_MotorDetached;
+            else if (m_connectionState.Value.TopBlockId.Value == 0)
+                return MySpaceTexts.BlockPropertiesText_MotorAttachingAny;
+            else if (SafeConstraint != null)
+                return MySpaceTexts.BlockPropertiesText_MotorAttached;
+            else
+                return MySpaceTexts.BlockPropertiesText_MotorAttachingSpecific;
+        }
 
-        protected abstract void RefreshConstraint();
+        protected virtual void CustomUnweld()
+        { 
+        }
+
+        protected HkConstraint SafeConstraint
+        {
+            get { RefreshConstraint(); return m_constraint; }
+        }
     }
 }

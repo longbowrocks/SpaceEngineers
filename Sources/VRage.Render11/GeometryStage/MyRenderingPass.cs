@@ -228,12 +228,14 @@ namespace VRageRender
             }
         }
 
-        internal void RecordCommands(MyRenderableProxy proxy, int section = -1)
+        internal void RecordCommands(MyRenderableProxy proxy)
         {
-            RecordCommandsInternal(proxy, section);
+            RecordCommandsInternal(proxy);
         }
 
-        protected virtual void RecordCommandsInternal(MyRenderableProxy proxy, int section) { }
+        protected virtual void RecordCommandsInternal(MyRenderableProxy proxy)
+        {
+        }
 
         internal void RecordCommands(ref MyRenderableProxy_2 proxy, int instance = -1, int section = -1)
         {
@@ -277,7 +279,11 @@ namespace VRageRender
 
                 fixed (byte* dstPtr = buffer)
                 {
+#if XB1
+                    SharpDX.Utilities.CopyMemory(new IntPtr(dstPtr), new IntPtr(&constants), size);
+#else // !XB1
                     MyMemory.CopyMemory(new IntPtr(dstPtr), new IntPtr(&constants), (uint)size);
+#endif // !XB1
                 }
             }
 

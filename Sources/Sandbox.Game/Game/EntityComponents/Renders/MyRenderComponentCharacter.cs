@@ -210,7 +210,7 @@ namespace Sandbox.Game.Components
 
             float distance = Vector3.Distance(character.PositionComp.GetPosition(), MySector.MainCamera.Position);
 
-            if (!character.IsInFirstPersonView && distance < MyCharacter.LIGHT_GLARE_MAX_DISTANCE && reflectorLevel > 0)
+            if ((character != MySession.Static.LocalCharacter || !character.IsInFirstPersonView)&& distance < MyCharacter.LIGHT_GLARE_MAX_DISTANCE && reflectorLevel > 0)
             {
                 float alpha = MathHelper.Clamp((MyCharacter.LIGHT_GLARE_MAX_DISTANCE - 10.0f) / distance, 0, 1);
 
@@ -351,7 +351,7 @@ namespace Sandbox.Game.Components
             {
 	            Vector3D position = Vector3D.Zero;
 
-                if ((jetpack.TurnedOn && jetpack.IsPowered) && !character.IsInFirstPersonView)
+                if ((jetpack.TurnedOn && jetpack.IsPowered) && (!character.IsInFirstPersonView ||character != MySession.Static.LocalCharacter))
                 {
                     var thrustMatrix = (MatrixD)thrust.ThrustMatrix * Container.Entity.PositionComp.WorldMatrix;
                     Vector3D forward = Vector3D.TransformNormal(thrust.Forward, thrustMatrix);
@@ -605,6 +605,9 @@ namespace Sandbox.Game.Components
 
         public void UpdateLight(float lightPower, bool updateRenderObject)
         {
+            if (m_light == null)
+                return;
+
             if (lightPower <= 0.0f)
             {
                 m_light.ReflectorOn = false;
@@ -621,16 +624,13 @@ namespace Sandbox.Game.Components
                 UpdateLightPosition();
 
                 VRageRender.MyRenderProxy.UpdateModelProperties(
-                RenderObjectIDs[0],
-                0,
-                Model.AssetName,
-                -1,
-                "Light",
-                null,
-                null,
-                null,
-                null,
-                lightPower);
+                    RenderObjectIDs[0],
+                    0,
+                    -1,
+                    "Light",
+                    null,
+                    null,
+                    null);
 
                 UpdateLightProperties(lightPower);
             }

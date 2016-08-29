@@ -36,6 +36,7 @@ namespace VRageRender
         internal Queue<MyIssuedQuery> m_issued = new Queue<MyIssuedQuery>(128);
     }
 
+#if !XB1 // XB1_NOPROFILER
     class MyFrameProfiling
     {
         internal MyQuery m_disjoint;
@@ -97,7 +98,7 @@ namespace VRageRender
             }
 
             bool ok = true;
-            while (ok)
+            while (ok && m_frames.Count > 0)
             {
 				//this will fail if all frames are finished.
 				//ok = m_frames.ElementAt(0).IsFinished();
@@ -218,9 +219,44 @@ namespace VRageRender
         }
 
         [Conditional(VRage.ProfilerShort.PerformanceProfilingSymbol)]
+        internal static void IC_BeginNextBlock(string tag)
+        {
+            MyImmediateRC.RC.EndProfilingBlock();
+            MyImmediateRC.RC.BeginProfilingBlock(tag);
+        }
+        
+        [Conditional(VRage.ProfilerShort.PerformanceProfilingSymbol)]
         internal static void IC_EndBlock()
         {
             MyImmediateRC.RC.EndProfilingBlock();
         }
     }
+#else // XB1
+    class MyGpuProfiler
+    {
+        internal static void IC_BeginBlock(string tag)
+        {
+        }
+
+        internal static void IC_EndBlock()
+        {
+        }
+
+        internal static void StartFrame()
+        {
+        }
+
+        internal static void EndFrame()
+        {
+        }
+
+        internal static void IC_Enqueue(MyIssuedQuery q)
+        {
+        }
+
+        internal static void Join(MyFrameProfilingContext context)
+        {
+        }
+    }
+#endif // XB1
 }

@@ -22,6 +22,7 @@ using Sandbox.Game;
 using VRage;
 using Sandbox.Common.ObjectBuilders.Definitions;
 using System;
+using Sandbox.Engine.Voxels;
 using Sandbox.Game.Multiplayer;
 
 
@@ -35,11 +36,13 @@ namespace Sandbox.Engine.Physics
     using VRage.Game.Entity;
     using VRage.Game;
     using ParallelTasks;
+    using VRage.Game.ModAPI;
+    using VRage.ModAPI;
 
     [MySessionComponentDescriptor(MyUpdateOrder.Simulation, 500)]
     public class MyPhysics : MySessionComponentBase
     {
-        public struct HitInfo
+        public struct HitInfo : IHitInfo
         {
             public HitInfo(HkWorld.HitInfo hi, Vector3D worldPosition)
             {
@@ -49,12 +52,38 @@ namespace Sandbox.Engine.Physics
 
             public HkWorld.HitInfo HkHitInfo;
             public Vector3D Position;
+
+            Vector3D IHitInfo.Position
+            {
+                get { return Position; }
+            }
+
+            IMyEntity IHitInfo.HitEntity
+            {
+                get { return HkHitInfo.GetHitEntity(); }
+            }
+
+            public override string ToString()
+            {
+                //return base.ToString();
+                var hitEntity = HkHitInfo.GetHitEntity();
+                if (hitEntity != null)
+                {
+                    return hitEntity.ToString();
+                }
+                return base.ToString();
+            }
         }
 
         public struct MyContactPointEvent
         {
             public HkContactPointEvent ContactPointEvent;
             public Vector3D Position;
+
+            public Vector3 Normal
+            {
+                get { return ContactPointEvent.ContactPoint.Normal; }
+            }
         }
 
         public struct FractureImpactDetails
@@ -137,7 +166,7 @@ namespace Sandbox.Engine.Physics
         {
             get 
             {
-                if (MyFakes.ENABLE_SIMSPEED_LOCKING)
+                if (MyFakes.ENABLE_SIMSPEED_LOCKING || MyFakes.PRECISE_SIM_SPEED)
                 {
                     return MySandboxGame.SimulationRatio;
                 }
@@ -306,7 +335,7 @@ namespace Sandbox.Engine.Physics
             }
 
 
-            if (MyFakes.USE_LOD1_VOXEL_PHYSICS)
+            if (MyVoxelPhysicsBody.UseLod1VoxelPhysics)
             {
                 //large and low quality objects dont collide with lod0 voxel physics
                 world.DisableCollisionsBetween(CollisionLayers.DynamicDoubledCollisionLayer, CollisionLayers.VoxelCollisionLayer);
@@ -358,7 +387,7 @@ namespace Sandbox.Engine.Physics
             HkBaseSystem.EnableAssert(-668493307, false);
             //HkBaseSystem.EnableAssert((int)3626473989, false);
             //float broadphaseSize = 100000.0f; // For unlimited worlds
-            
+
             //Angular velocities and impulses
             HkBaseSystem.EnableAssert(952495168, false);
             HkBaseSystem.EnableAssert(1501626980, false);
@@ -375,22 +404,12 @@ namespace Sandbox.Engine.Physics
 
             ThreadId = Thread.CurrentThread.ManagedThreadId;
 
-            if (MyPerGameSettings.SingleCluster)
-            {
-                Clusters = new MyHavokCluster(MySession.Static.WorldBoundaries);
-            }
-            else
-            {
-                Clusters = new MyHavokCluster(null);
-            }
+            Clusters = new MyHavokCluster(MySession.Static.WorldBoundaries);
+
             Clusters.OnClusterCreated += OnClusterCreated;
             Clusters.OnClusterRemoved += OnClusterRemoved;
             Clusters.OnFinishBatch += OnFinishBatch;
 
-            if (MyPerGameSettings.SingleCluster)
-            {
-                Clusters.CreateSingleCluster();
-            }
             if (MyFakes.ENABLE_HAVOK_MULTITHREADING)
             {
                 m_threadPool = new HkJobThreadPool();
@@ -431,7 +450,7 @@ namespace Sandbox.Engine.Physics
 
             hkWorld.MarkForWrite();
 
-            if (MySession.Static.Settings.WorldSizeKm > 0 || MyPerGameSettings.SingleCluster)
+            if (MySession.Static.Settings.WorldSizeKm > 0)
             {
                 hkWorld.EntityLeftWorld += HavokWorld_EntityLeftWorld;
             }
@@ -631,7 +650,9 @@ namespace Sandbox.Engine.Physics
             ProfilerShort.Begin("HavokWorld.StepVDB");
             foreach (HkWorld world in Clusters.GetList())
             {
-                if (MySession.Static.ControlledEntity != null && MySession.Static.ControlledEntity.Entity.GetTopMostParent().GetPhysicsBody().HavokWorld == world)
+                if (MySession.Static.ControlledEntity != null
+                    && MySession.Static.ControlledEntity.Entity.GetTopMostParent().GetPhysicsBody() != null
+                    && MySession.Static.ControlledEntity.Entity.GetTopMostParent().GetPhysicsBody().HavokWorld == world)
                     world.StepVDB(VRage.Game.MyEngineConstants.UPDATE_STEP_SIZE_IN_SECONDS);
             }
 
@@ -933,7 +954,10 @@ namespace Sandbox.Engine.Physics
 
 
                     HkWorld havokWorld = (HkWorld)(world.UserData);
-                    havokWorld.CastRay(fromF, toF, m_resultHits, raycastFilterLayer);
+                    if (havokWorld != null)
+                    {
+                        havokWorld.CastRay(fromF, toF, m_resultHits, raycastFilterLayer);
+                    }
 
                     foreach (var hit in m_resultHits)
                     {

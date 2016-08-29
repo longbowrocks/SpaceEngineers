@@ -25,19 +25,46 @@ using VRage.ModAPI;
 using VRage.Network;
 using VRage.Utils;
 using VRageMath;
+#if XB1 // XB1_SYNC_SERIALIZER_NOEMIT
+using System.Reflection;
+using VRage.Reflection;
+#endif // XB1
 
 namespace SpaceEngineers.Game.Entities.Blocks
 {
     [MyCubeBlockType(typeof(MyObjectBuilder_LandingGear))]
     public class MyLandingGear : MyFunctionalBlock, IMyLandingGear, ModAPI.IMyLandingGear
     {
+#if !XB1 // XB1_SYNC_SERIALIZER_NOEMIT
         protected struct State
+#else // XB1
+        protected struct State : IMySetGetMemberDataHelper
+#endif // XB1
         {
             public bool Force;
             public long? OtherEntityId;
             public MyDeltaTransform? MasterToSlave;
             public Vector3? GearPivotPosition;
             public CompressedPositionOrientation? OtherPivot;
+
+#if XB1 // XB1_SYNC_SERIALIZER_NOEMIT
+            public object GetMemberData(MemberInfo m)
+            {
+                if (m.Name == "Force")
+                    return Force;
+                if (m.Name == "OtherEntityId")
+                    return OtherEntityId;
+                if (m.Name == "MasterToSlave")
+                    return MasterToSlave;
+                if (m.Name == "GearPivotPosition")
+                    return GearPivotPosition;
+                if (m.Name == "OtherPivot")
+                    return OtherPivot;
+
+                System.Diagnostics.Debug.Assert(false, "TODO for XB1.");
+                return null;
+            }
+#endif // XB1
         }
 
         private MySoundPair m_lockSound;
@@ -115,6 +142,12 @@ namespace SpaceEngineers.Game.Entities.Blocks
 
         public MyLandingGear()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_lockModeSync = SyncType.CreateAndAddProp<LandingGearMode>();
+            m_autoLock = SyncType.CreateAndAddProp<bool>();
+            m_attachedState = SyncType.CreateAndAddProp<State>();
+            m_breakForceSync = SyncType.CreateAndAddProp<float>();
+#endif // XB1
             CreateTerminalControls();
 
             m_physicsChangedHandler = new Action<IMyEntity>(PhysicsChanged);
@@ -710,7 +743,6 @@ namespace SpaceEngineers.Game.Entities.Blocks
         {
             if (CubeGrid.Physics != null && CubeGrid.Physics.Enabled)
             {
-                var body = entity.Physics.RigidBody;
                 var handle = StateChanged;
 
                 if (Sync.IsServer && entity is MyCubeGrid)
@@ -733,7 +765,8 @@ namespace SpaceEngineers.Game.Entities.Blocks
                     }
                     else
                     {
-                        MyWeldingGroups.Static.CreateLink(EntityId, CubeGrid, entity);
+                        MyEntity parent = entity.GetTopMostParent();
+                        MyWeldingGroups.Static.CreateLink(EntityId, CubeGrid, parent);
                     }
                     //OnConstraintAdded(GridLinkTypeEnum.LandingGear, entity);
                     m_lockModeSync.Value = LandingGearMode.Locked;
@@ -761,6 +794,8 @@ namespace SpaceEngineers.Game.Entities.Blocks
 
                 if (m_attachedTo != null || entity == null || m_constraint != null)
                     return;
+
+                var body = entity.GetTopMostParent().Physics.RigidBody;
 
                 body.Activate();
                 CubeGrid.Physics.RigidBody.Activate();
@@ -823,16 +858,27 @@ namespace SpaceEngineers.Game.Entities.Blocks
         {
             if (BreakForce < MyObjectBuilder_LandingGear.MaxSolverImpulse)
                 return false;
-            var grid = entity as MyCubeGrid;
+
+            MyCubeGrid grid = entity as MyCubeGrid;
+
+            if (grid == null)
+            {
+                var block = entity as MyCubeBlock;
+                if(block != null)
+                {
+                    grid = block.CubeGrid;
+                }
+            }
+
             if (grid != null)
             {
                 Vector3I cube;
                 grid.FixTargetCube(out cube, otherBodySpacePivot.Translation * grid.GridSizeR);
-                var block = grid.GetCubeBlock(cube);
-                if (block != null && block.FatBlock is MyAirtightHangarDoor)
+                var hangar = grid.GetCubeBlock(cube);
+                if (hangar != null && hangar.FatBlock is MyAirtightHangarDoor)
                     return false;
             }
-            if (entity.Parent != null)
+            else if (entity.Parent != null)
                 return false;
             return true;
         }
@@ -892,7 +938,15 @@ namespace SpaceEngineers.Game.Entities.Blocks
                 //temporary fix by Gregory for the Landing gears do not want to lock bug. This should be check further though
             }
             else if (entity.Physics == null)
-            {
+            {        
+                if (LockMode == LandingGearMode.Locked)
+                {
+                    if (Sync.IsServer)
+                    {
+                        m_needsToRetryLock = true;
+                    }
+                }
+
                 Detach();
             }
             else if (LockMode == LandingGearMode.Locked)
@@ -1060,6 +1114,7 @@ namespace SpaceEngineers.Game.Entities.Blocks
 
             if (Sync.IsServer)
             {
+             
                 CubeGrid.OnGridSplit -= CubeGrid_OnGridSplit;
             }
         }
@@ -1071,6 +1126,23 @@ namespace SpaceEngineers.Game.Entities.Blocks
 
             if (Sync.IsServer)
             {
+
+                if (m_attachedState.Value.OtherEntityId.HasValue)
+                {
+                    if (this.CubeGrid.Physics == null)
+                    {
+                        m_needsToRetryLock = true;
+                    }
+                    else
+                    {
+                        RetryLockServer();
+                        var state = m_attachedState.Value;
+                        state.Force = true;
+                        m_attachedState.Value = state;
+                    }
+                }
+
+                
                 CubeGrid.OnGridSplit += CubeGrid_OnGridSplit;
             }
         }
@@ -1078,6 +1150,13 @@ namespace SpaceEngineers.Game.Entities.Blocks
         protected void CubeGrid_OnGridSplit(MyCubeGrid grid1, MyCubeGrid grid2)
         {
             ResetLockConstraint(true,true);
+            if (m_attachedState.Value.OtherEntityId.HasValue)
+            {
+                RetryLockClient();
+                var state = m_attachedState.Value;
+                state.Force = true;
+                m_attachedState.Value = state;
+            }
         }
       
     }

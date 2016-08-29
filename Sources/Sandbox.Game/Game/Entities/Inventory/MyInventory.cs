@@ -40,6 +40,7 @@ using VRage.Game.ModAPI.Ingame;
 using Sandbox.Game.Entities.Interfaces;
 using Sandbox.Game.GUI;
 using Sandbox.Game.SessionComponents;
+using IMyEntity = VRage.ModAPI.IMyEntity;
 
 #endregion
 
@@ -147,7 +148,13 @@ namespace Sandbox.Game
             m_maxMass = maxMass;
             m_flags = flags;
 
+#if !XB1 // !XB1_SYNC_NOREFLECTION
             SyncType = SyncHelpers.Compose(this);
+#else // XB1
+            SyncType = new SyncType(new List<SyncBase>());
+            m_currentVolume = SyncType.CreateAndAddProp<MyFixedPoint>();
+            m_currentMass = SyncType.CreateAndAddProp<MyFixedPoint>();
+#endif // XB1
             m_currentVolume.ValueChanged += (x) => PropertiesChanged();
             m_currentVolume.ValidateNever();
 
@@ -163,6 +170,7 @@ namespace Sandbox.Game
             : this(definition.InventoryVolume, definition.InventoryMass, new Vector3(definition.InventorySizeX, definition.InventorySizeY, definition.InventorySizeZ), flags)
         {
             myObjectBuilder_InventoryDefinition = definition;
+
         }
 
         #endregion
@@ -196,7 +204,7 @@ namespace Sandbox.Game
                 if (!MyPerGameSettings.ConstrainInventory()) return int.MaxValue;
                 if (!m_multiplierEnabled) return m_maxItemCount;
 
-                long itemCount = (long)(m_maxItemCount * (double)MySession.Static.InventoryMultiplier);
+                long itemCount = Math.Max(1, (long)(m_maxItemCount * (double)MySession.Static.InventoryMultiplier));
                 if (itemCount > (long)int.MaxValue) itemCount = (long)int.MaxValue;
                 return (int)itemCount;
             }
@@ -383,20 +391,17 @@ namespace Sandbox.Game
         {
             MyFixedPoint sum = 0;
             MyFixedPoint max = adapter.MaxStackAmount;
-            for (int i = 0; i < MaxItemCount; ++i)
+            for (int i = 0; i < m_items.Count; ++i)
             {
-                if (i < m_items.Count)
+                if (m_items[i].Content.CanStack(contentId.TypeId, contentId.SubtypeId, MyItemFlags.None))
                 {
-                    if (m_items[i].Content.CanStack(contentId.TypeId, contentId.SubtypeId, MyItemFlags.None))
-                    {
-                        sum = MyFixedPoint.AddSafe(sum, max - m_items[i].Amount);
-                    }
-                }
-                else
-                {
-                    sum = MyFixedPoint.AddSafe(sum, max);
+                    sum = MyFixedPoint.AddSafe(sum, max - m_items[i].Amount);
                 }
             }
+
+            var diff = MaxItemCount - m_items.Count;
+            if (diff > 0)
+                sum = MyFixedPoint.AddSafe(sum, max * diff);
 
             return sum;
         }
@@ -837,9 +842,14 @@ namespace Sandbox.Game
 
             if (index >= 0 && index < m_items.Count)
             {
-                MyPhysicalInventoryItem prevItem = m_items[index];
+                //GR: Shift items not add to last position. Slower but more consistent with game logic
+                m_items.Add(m_items[m_items.Count - 1]);
+                for (int i = m_items.Count - 3; i >= index; i--)
+                {
+                    m_items[i+1] = m_items[i];
+                }
                 m_items[index] = newItem;
-                m_items.Add(prevItem);
+                
             }
             else
             {
@@ -1683,6 +1693,7 @@ namespace Sandbox.Game
                 RemoveEntityOnEmpty = inventoryComponentDefinition.RemoveEntityOnEmpty;
                 m_multiplierEnabled = inventoryComponentDefinition.MultiplierEnabled;
                 m_maxItemCount = inventoryComponentDefinition.MaxItemCount;
+                Constraint = inventoryComponentDefinition.InputConstraint;
             }
         }
 
@@ -1719,7 +1730,7 @@ namespace Sandbox.Game
             containerDefinition.DeselectAll();
         }
 
-        public override MyObjectBuilder_ComponentBase Serialize()
+        public override MyObjectBuilder_ComponentBase Serialize(bool copy = false)
         {
             return GetObjectBuilder();
         }

@@ -58,6 +58,7 @@ namespace Sandbox.Engine.Utils
         readonly string MUSIC_VOLUME = "MusicVolume";
         readonly string VOICE_CHAT_VOLUME = "VoiceChatVolume";
         readonly string LANGUAGE = "Language";
+        readonly string SKIN = "Skin";
         readonly string CONTROLS_HINTS = "ControlsHints";
         readonly string ROTATION_HINTS = "RotationHints";
         readonly string SHOW_CROSSHAIR = "ShowCrosshair";
@@ -91,6 +92,7 @@ namespace Sandbox.Engine.Utils
         readonly string ANISOTROPIC_FILTERING = "AnisotropicFiltering";
         readonly string FOLIAGE_DETAILS = "FoliageDetails";
         readonly string GRASS_DENSITY = "GrassDensity";
+        readonly string VEGETATION_DISTANCE = "VegetationViewDistance";
         readonly string GRAPHICS_RENDERER = "GraphicsRenderer";
         readonly string ENABLE_VOICE_CHAT = "VoiceChat";
         readonly string ENABLE_MUTE_WHEN_NOT_IN_FOCUS = "EnableMuteWhenNotInFocus";
@@ -197,6 +199,20 @@ namespace Sandbox.Engine.Utils
             set
             {
                 SetParameterValue(GRASS_DENSITY, value);
+            }
+        }
+
+
+        public float VegetationDrawDistance
+        {
+            get
+            {
+                return MyUtils.GetFloatFromString(GetParameterValue(VEGETATION_DISTANCE), 100);
+            }
+
+            set
+            {
+                SetParameterValue(VEGETATION_DISTANCE, value);
             }
         }
 
@@ -499,6 +515,25 @@ namespace Sandbox.Engine.Utils
             set
             {
                 SetParameterValue(LANGUAGE, (byte)value);
+            }
+        }
+
+        public string Skin
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(GetParameterValue(SKIN)))
+                {
+                    SetParameterValue(SKIN, "Default");
+                    Save();
+                }
+
+                return GetParameterValue(SKIN);
+            }
+
+            set
+            {
+                SetParameterValue(SKIN, value);
             }
         }
 

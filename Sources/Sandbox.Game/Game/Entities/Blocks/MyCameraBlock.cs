@@ -10,7 +10,7 @@ using Sandbox.Game.Localization;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.Screens.Terminal.Controls;
 using Sandbox.Game.World;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using Sandbox.ModAPI.Interfaces;
 using SteamSDK;
 using System;
@@ -60,6 +60,9 @@ namespace Sandbox.Game.Entities
 
         public MyCameraBlock()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_syncFov = SyncType.CreateAndAddProp<float>();
+#endif // XB1
             CreateTerminalControls();
 
             m_syncFov.ValueChanged += (x) => OnSyncFov();

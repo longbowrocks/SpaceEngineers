@@ -9,7 +9,7 @@ using Sandbox.Game.Entities.Cube;
 using Sandbox.Game.EntityComponents;
 using Sandbox.Game.GameSystems;
 using Sandbox.ModAPI.Ingame;
-using SpaceEngineers.Game.ModAPI.Ingame;
+using SpaceEngineers.Game.ModAPI;
 using VRage;
 using VRage.Game;
 using VRage.Game.Components;
@@ -105,6 +105,9 @@ namespace SpaceEngineers.Game.Entities.Blocks
         public MyGravityGeneratorBase()
             : base()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_gravityAcceleration = SyncType.CreateAndAddProp<float>();
+#endif // XB1
             m_gravityAcceleration.ValueChanged += (x) => AccelerationChanged();
         }
 
@@ -164,7 +167,7 @@ namespace SpaceEngineers.Game.Entities.Blocks
                     else if (!entity.Physics.IsKinematic && 
                         !entity.Physics.IsStatic &&
                         entity.Physics.RigidBody2 == null && //jn: TODO this is actualy check for large grid
-                        (character == null || character.IsDead)) 
+                        character == null) 
                     {
                         if (entity.Physics.RigidBody != null && entity.Physics.RigidBody.IsActive)
                             entity.Physics.AddForce(MyPhysicsForceType.APPLY_WORLD_FORCE, gravity * entity.Physics.RigidBody.Mass, null, null);
@@ -284,17 +287,6 @@ namespace SpaceEngineers.Game.Entities.Blocks
 
         
         public bool EnableLongDrawDistance()
-        {
-            return false;
-        }
-
-
-        public Vector3 GetWorldGravityGrid(Vector3D worldPoint)
-        {
-            return Vector3.Zero;
-        }
-
-        public bool IsPositionInRangeGrid(Vector3D worldPoint)
         {
             return false;
         }

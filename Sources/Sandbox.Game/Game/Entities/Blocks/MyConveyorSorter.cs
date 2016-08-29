@@ -18,7 +18,7 @@ using Sandbox.Game.GameSystems.Electricity;
 using VRage;
 using Sandbox.Game.GameSystems;
 using VRage.Utils;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using VRage.ObjectBuilders;
 using VRage.ModAPI;
 using Sandbox.ModAPI.Interfaces;
@@ -93,6 +93,9 @@ namespace Sandbox.Game.Entities
 
         public MyConveyorSorter()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_drainAll = SyncType.CreateAndAddProp<bool>();
+#endif // XB1
             CreateTerminalControls();
 
             m_drainAll.ValueChanged += x => DoChangeDrainAll();

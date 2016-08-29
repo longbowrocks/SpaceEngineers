@@ -13,7 +13,7 @@ using Sandbox.Game.GameSystems;
 using Sandbox.Game.Gui;
 using Sandbox.Game.Localization;
 using Sandbox.ModAPI.Ingame;
-using SpaceEngineers.Game.ModAPI.Ingame;
+using SpaceEngineers.Game.ModAPI;
 using VRage;
 using VRage.Game;
 using VRage.Utils;
@@ -54,6 +54,9 @@ namespace SpaceEngineers.Game.Entities.Blocks
 
         public MyGravityGenerator()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_fieldSize = SyncType.CreateAndAddProp<Vector3>();
+#endif // XB1
             CreateTerminalControls();
 
             m_fieldSize.ValueChanged += (x) => UpdateFieldShape();
@@ -195,10 +198,10 @@ namespace SpaceEngineers.Game.Entities.Blocks
             return new HkBoxShape(m_fieldSize.Value * 0.5f);
         }
 
-        float IMyGravityGenerator.FieldWidth { get { return m_fieldSize.Value.X; } }
-        float IMyGravityGenerator.FieldHeight { get { return m_fieldSize.Value.Y; } }
-        float IMyGravityGenerator.FieldDepth { get { return m_fieldSize.Value.Z; } }
-        float IMyGravityGenerator.Gravity { get { return GravityAcceleration / MyGravityProviderSystem.G; } }
+        float ModAPI.Ingame.IMyGravityGenerator.FieldWidth { get { return m_fieldSize.Value.X; } }
+        float ModAPI.Ingame.IMyGravityGenerator.FieldHeight { get { return m_fieldSize.Value.Y; } }
+        float ModAPI.Ingame.IMyGravityGenerator.FieldDepth { get { return m_fieldSize.Value.Z; } }
+        float ModAPI.Ingame.IMyGravityGenerator.Gravity { get { return GravityAcceleration / MyGravityProviderSystem.G; } }
     }
 }
 

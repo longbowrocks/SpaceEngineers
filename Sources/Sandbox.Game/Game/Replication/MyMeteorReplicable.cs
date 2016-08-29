@@ -21,6 +21,11 @@ namespace Sandbox.Game.Replication
     class MyMeteorReplicable : MyEntityReplicableBaseEvent<MyMeteor>
     {
         #region IMyReplicable Implementation
+
+        public MyMeteorReplicable()
+        {
+            m_baseVisibility = 5000;
+        }
  
         public override void OnDestroy()
         {

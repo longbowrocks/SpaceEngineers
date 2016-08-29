@@ -59,15 +59,21 @@ namespace VRage.Game.Components
         {
         }
 
+        /// <summary>
+        /// CH: TOOD: Be careful! This does not get called if the component is added to a container that is in the scene already!
+        /// </summary>
         public virtual void OnAddedToScene()
         {
         }
 
+        /// <summary>
+        /// CH: TOOD: Be careful! This does not get called if the component is removed from a container that is still in the scene!
+        /// </summary>
         public virtual void OnRemovedFromScene()
         {
         }
 
-        public virtual MyObjectBuilder_ComponentBase Serialize()
+        public virtual MyObjectBuilder_ComponentBase Serialize(bool copy = false)
         {
             return MyComponentFactory.CreateObjectBuilder(this);
         }

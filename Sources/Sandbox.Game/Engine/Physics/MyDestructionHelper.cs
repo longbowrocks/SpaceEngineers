@@ -19,6 +19,7 @@ using VRage.ModAPI;
 using VRageMath;
 using Sandbox.Game.EntityComponents;
 using Sandbox.Engine.Multiplayer;
+using Sandbox.Game.Replication;
 using VRage.Game;
 using VRage.Utils;
 using VRage.Game.Entity;
@@ -147,7 +148,8 @@ namespace Sandbox.Engine.Physics
                 fracturedPiece.DebugCheckValidShapes();
 
             ProfilerShort.Begin("MyEntities.Add");
-            MyEntities.RaiseEntityCreated(fracturedPiece);
+            if (MyExternalReplicable.FindByObject(fracturedPiece) == null)
+                MyEntities.RaiseEntityCreated(fracturedPiece);
             MyEntities.Add(fracturedPiece);
             ProfilerShort.End();
 
@@ -250,10 +252,10 @@ namespace Sandbox.Engine.Physics
         /// <param name="worldMatrix"></param>
         /// <param name="definition"> without definition the piece wont save</param>
         /// <returns></returns>
-        public static MyFracturedPiece CreateFracturePiece(HkdBreakableShape shape, HkdWorld world, ref MatrixD worldMatrix, bool isStatic, MyDefinitionId? definition, bool sync)
+        public static MyFracturedPiece CreateFracturePiece(HkdBreakableShape shape, ref MatrixD worldMatrix, bool isStatic, MyDefinitionId? definition, bool sync)
         {
             System.Diagnostics.Debug.Assert(Sync.IsServer, "Only on server");
-            var fracturedPiece = CreateFracturePiece(ref shape, world, ref worldMatrix, isStatic);
+            var fracturedPiece = CreateFracturePiece(ref shape, ref worldMatrix, isStatic);
 
             if (definition.HasValue)
             {
@@ -272,7 +274,8 @@ namespace Sandbox.Engine.Physics
                 fracturedPiece.DebugCheckValidShapes();
 
             ProfilerShort.Begin("MyEntities.Add");
-            MyEntities.RaiseEntityCreated(fracturedPiece);
+            if (MyExternalReplicable.FindByObject(fracturedPiece) == null)
+                MyEntities.RaiseEntityCreated(fracturedPiece);
             MyEntities.Add(fracturedPiece);
             ProfilerShort.End();
 
@@ -284,7 +287,7 @@ namespace Sandbox.Engine.Physics
             System.Diagnostics.Debug.Assert(Sync.IsServer, "Only on server");
             var m = fracturedBlock.CubeGrid.PositionComp.WorldMatrix;
             m.Translation = fracturedBlock.CubeGrid.GridIntegerToWorld(fracturedBlock.Position);
-            var fp = CreateFracturePiece(ref fracturedBlock.Shape, fracturedBlock.CubeGrid.GetPhysicsBody().HavokWorld.DestructionWorld, ref m, false);
+            var fp = CreateFracturePiece(ref fracturedBlock.Shape, ref m, false);
             fp.OriginalBlocks = fracturedBlock.OriginalBlocks;
 
             MyPhysicalModelDefinition def;
@@ -296,7 +299,8 @@ namespace Sandbox.Engine.Physics
                 fp.DebugCheckValidShapes();
 
             ProfilerShort.Begin("MyEntities.Add");
-            MyEntities.RaiseEntityCreated(fp);
+            if (MyExternalReplicable.FindByObject(fp) == null)
+                MyEntities.RaiseEntityCreated(fp);
             MyEntities.Add(fp);
             ProfilerShort.End();
 
@@ -317,7 +321,7 @@ namespace Sandbox.Engine.Physics
 
             System.Diagnostics.Debug.Assert(Sync.IsServer, "Only on server");
             var m = fractureBlockComponent.Block.FatBlock.WorldMatrix;
-            var fp = CreateFracturePiece(ref fractureBlockComponent.Shape, fractureBlockComponent.Block.CubeGrid.GetPhysicsBody().HavokWorld.DestructionWorld, ref m, false);
+            var fp = CreateFracturePiece(ref fractureBlockComponent.Shape, ref m, false);
             fp.OriginalBlocks.Add(fractureBlockComponent.Block.BlockDefinition.Id);
 
             // Check valid shapes from block definitions. 
@@ -329,14 +333,15 @@ namespace Sandbox.Engine.Physics
                 fp.Physics.MaterialType = def.PhysicalMaterial.Id.SubtypeId;
 
             ProfilerShort.Begin("MyEntities.Add");
-            MyEntities.RaiseEntityCreated(fp);
+            if (MyExternalReplicable.FindByObject(fp) == null)
+                MyEntities.RaiseEntityCreated(fp);
             MyEntities.Add(fp);
             ProfilerShort.End();
 
             return fp;
         }
 
-        private static MyFracturedPiece CreateFracturePiece(ref HkdBreakableShape shape, HkdWorld world, ref MatrixD worldMatrix, bool isStatic)
+        private static MyFracturedPiece CreateFracturePiece(ref HkdBreakableShape shape, ref MatrixD worldMatrix, bool isStatic)
         {
             Debug.Assert(shape.IsValid());
             ProfilerShort.Begin("CreateFracturePiece");
@@ -354,7 +359,7 @@ namespace Sandbox.Engine.Physics
             physicsBody.AngularDamping = MyPerGameSettings.DefaultAngularDamping;
 
             System.Diagnostics.Debug.Assert(physicsBody.BreakableBody == null, "physicsBody.DestructionBody == null");
-            physicsBody.BreakableBody = new HkdBreakableBody(shape, physicsBody.RigidBody, world, worldMatrix);
+            physicsBody.BreakableBody = new HkdBreakableBody(shape, physicsBody.RigidBody, null, worldMatrix);
             physicsBody.BreakableBody.AfterReplaceBody += physicsBody.FracturedBody_AfterReplaceBody;
             ProfilerShort.End();
 

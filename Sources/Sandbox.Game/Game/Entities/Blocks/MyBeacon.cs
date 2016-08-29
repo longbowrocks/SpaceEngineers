@@ -10,7 +10,7 @@ using Sandbox.Engine.Utils;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.Components;
 using Sandbox.Game.EntityComponents;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using Sandbox.Game.Localization;
 using VRage;
 using VRage.Game;
@@ -47,6 +47,9 @@ namespace Sandbox.Game.Entities.Cube
 
         public MyBeacon()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_radius = SyncType.CreateAndAddProp<float>();
+#endif // XB1
             CreateTerminalControls();
 
             m_radius.ValueChanged += (obj) => ChangeRadius();
@@ -62,17 +65,12 @@ namespace Sandbox.Game.Entities.Cube
             if (MyTerminalControlFactory.AreControlsCreated<MyBeacon>())
                 return;
 
-            MyTerminalControlFactory.RemoveBaseClass<MyBeacon, MyTerminalBlock>();
+            //MyTerminalControlFactory.RemoveBaseClass<MyBeacon, MyTerminalBlock>(); // this removed also controls shared with other blocks
 
-            var show = new MyTerminalControlOnOffSwitch<MyBeacon>("ShowInTerminal", MySpaceTexts.Terminal_ShowInTerminal, MySpaceTexts.Terminal_ShowInTerminalToolTip);
-            show.Getter = (x) => x.ShowInTerminal;
-            show.Setter = (x, v) => x.ShowInTerminal= v;
-            MyTerminalControlFactory.AddControl(show);
-
-            var showConfig = new MyTerminalControlOnOffSwitch<MyBeacon>("ShowInToolbarConfig", MySpaceTexts.Terminal_ShowInToolbarConfig, MySpaceTexts.Terminal_ShowInToolbarConfigToolTip);
-            showConfig.Getter = (x) => x.ShowInToolbarConfig;
-            showConfig.Setter = (x, v) => x.ShowInToolbarConfig = v;
-            MyTerminalControlFactory.AddControl(showConfig);
+            //removed unnecessary controls
+            var controlList = MyTerminalControlFactory.GetList(typeof(MyBeacon)).Controls;
+            controlList.Remove(controlList[4]);//name
+            controlList.Remove(controlList[4]);//show on HUD
 
             var customName = new MyTerminalControlTextbox<MyBeacon>("CustomName", MyCommonTexts.Name, MySpaceTexts.Blank);
             customName.Getter = (x) => x.CustomName;
@@ -393,7 +391,7 @@ namespace Sandbox.Game.Entities.Cube
             MyValueFormatter.AppendWorkInBestUnit(ResourceSink.IsPowered ? ResourceSink.RequiredInput : 0, DetailedInfo);
             RaisePropertiesChanged();
         }
-        float IMyBeacon.Radius
+        float ModAPI.Ingame.IMyBeacon.Radius
         {
             get { return RadioBroadcaster.BroadcastRadius; }
         }

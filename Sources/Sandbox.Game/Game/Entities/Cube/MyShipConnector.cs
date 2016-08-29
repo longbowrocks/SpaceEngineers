@@ -12,7 +12,7 @@ using Sandbox.Game.Localization;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.Screens.Terminal.Controls;
 using Sandbox.Game.World;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using SteamSDK;
 using System;
 using System.Collections.Generic;
@@ -32,6 +32,11 @@ using Sandbox.ModAPI.Interfaces;
 using VRage.Game.Entity;
 using VRage.Game;
 using VRage.Game.ModAPI.Ingame;
+using IMyEntity = VRage.ModAPI.IMyEntity;
+#if XB1 // XB1_SYNC_SERIALIZER_NOEMIT
+using System.Reflection;
+using VRage.Reflection;
+#endif // XB1
 
 namespace Sandbox.Game.Entities.Cube
 {
@@ -41,7 +46,11 @@ namespace Sandbox.Game.Entities.Cube
         /// <summary>
         /// Represents connector state, atomic for sync, 8 B + 1b + 1b/12.5B
         /// </summary>
+#if !XB1 // XB1_SYNC_SERIALIZER_NOEMIT
         struct State
+#else // XB1
+        struct State : IMySetGetMemberDataHelper
+#endif // XB1
         {
             public static readonly State Detached = new State();
             public static readonly State DetachedMaster = new State() { IsMaster = true };
@@ -50,6 +59,23 @@ namespace Sandbox.Game.Entities.Cube
             public long OtherEntityId; // zero when detached, valid EntityId when approaching or connected
             public MyDeltaTransform? MasterToSlave; // relative connector-to-connector world transform MASTER * DELTA = SLAVE, null when detached/approaching, valid value when connected
             public MyDeltaTransform? MasterToSlaveGrid;
+
+#if XB1 // XB1_SYNC_SERIALIZER_NOEMIT
+            public object GetMemberData(MemberInfo m)
+            {
+                if (m.Name == "IsMaster")
+                    return IsMaster;
+                if (m.Name == "OtherEntityId")
+                    return OtherEntityId;
+                if (m.Name == "MasterToSlave")
+                    return MasterToSlave;
+                if (m.Name == "MasterToSlaveGrid")
+                    return MasterToSlaveGrid;
+
+                System.Diagnostics.Debug.Assert(false, "TODO for XB1.");
+                return null;
+            }
+#endif // XB1
         }
 
         private enum Mode
@@ -114,6 +140,12 @@ namespace Sandbox.Game.Entities.Cube
 
         public MyShipConnector()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            ThrowOut = SyncType.CreateAndAddProp<bool>();
+            CollectAll = SyncType.CreateAndAddProp<bool>();
+            Strength = SyncType.CreateAndAddProp<float>();
+            m_connectionState = SyncType.CreateAndAddProp<State>();
+#endif // XB1
             CreateTerminalControls();
 
             m_connectionState.ValueChanged += (o) => OnConnectionStateChanged();
@@ -1271,11 +1303,17 @@ namespace Sandbox.Game.Entities.Cube
                 Detach();
             }
 
+            base.Closing();
+        }
+
+
+        protected override void BeforeDelete()
+        {
+            base.BeforeDelete();
+
             // The connector dummy won't be disposed of automatically, so we have to do it manually
             if (m_connectorDummy != null)
                 m_connectorDummy.Close();
-
-            base.Closing();
         }
 
         public override void DebugDrawPhysics()
@@ -1339,11 +1377,12 @@ namespace Sandbox.Game.Entities.Cube
         #endregion
 
         #region IMyShipConnector
-        bool IMyShipConnector.ThrowOut { get { return ThrowOut; } }
-        bool IMyShipConnector.CollectAll { get { return CollectAll; } }
-        bool IMyShipConnector.IsLocked { get { return IsWorking && InConstraint; } }
-        bool IMyShipConnector.IsConnected { get { return Connected; } }
-        IMyShipConnector IMyShipConnector.OtherConnector { get { return m_other; } }
+        bool ModAPI.Ingame.IMyShipConnector.ThrowOut { get { return ThrowOut; } }
+        bool ModAPI.Ingame.IMyShipConnector.CollectAll { get { return CollectAll; } }
+        bool ModAPI.Ingame.IMyShipConnector.IsLocked { get { return IsWorking && InConstraint; } }
+        bool ModAPI.Ingame.IMyShipConnector.IsConnected { get { return Connected; } }
+        ModAPI.Ingame.IMyShipConnector ModAPI.Ingame.IMyShipConnector.OtherConnector { get { return m_other; } }
+        IMyShipConnector ModAPI.IMyShipConnector.OtherConnector { get { return m_other; } }
         #endregion
 
         public bool UseConveyorSystem

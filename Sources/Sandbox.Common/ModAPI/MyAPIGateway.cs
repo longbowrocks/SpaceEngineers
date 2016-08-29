@@ -36,6 +36,7 @@ namespace Sandbox.ModAPI
                 m_sessionStorage = value;
             }
         }
+
         /// <summary>
         /// IMyEntities represents all objects that currently in world 
         /// </summary>
@@ -83,16 +84,28 @@ namespace Sandbox.ModAPI
         /// </summary>
         public static IMyMultiplayer Multiplayer;
         /// <summary>
-        /// IMyParallelTask allows to run tasks on baground threads 
+        /// IMyParallelTask allows to run tasks on background threads 
         /// </summary>
         public static IMyParallelTask Parallel;
 
+        /// <summary>
+        /// IMyPhysics contains physics related things (CastRay, etc.)
+        /// </summary>
+        public static IMyPhysics Physics;
+
         public static IMyPrefabManager PrefabManager;
+
+#if !XB1 // XB1_NOILINJECTOR
+        /// <summary>
+        /// Provides mod access to control compilation of ingame scripts
+        /// </summary>
+        public static IMyIngameScripting IngameScripting;
+#endif // !XB1
 
         /// <summary>
         /// IMyInput allows accessing direct input device states
         /// </summary>
-        public static VRage.ModAPI.IMyInput Input;
+        public static IMyInput Input;
 
         // Storage for property Entities.
         private static IMyEntities m_entitiesStorage;
@@ -101,6 +114,7 @@ namespace Sandbox.ModAPI
 
 
 
+#if !XB1
         [Conditional("DEBUG")] 
         public static void GetMessageBoxPointer(ref IntPtr pointer)
         {
@@ -114,6 +128,7 @@ namespace Sandbox.ModAPI
 
         [DllImport("kernel32.dll")]
         private static extern IntPtr GetProcAddress(IntPtr hModule, String procname);
+#endif // !XB1
 
         public static void Clean()
         {
@@ -121,9 +136,15 @@ namespace Sandbox.ModAPI
             Entities = null;
             Players = null;
             CubeBuilder = null;
+            if (IngameScripting != null)
+            {
+                IngameScripting.Clean();
+            }
+            IngameScripting = null;
             TerminalActionsHelper = null;
             Utilities = null;
             Parallel = null;
+            Physics = null;
             Multiplayer = null;
             PrefabManager = null;
             Input = null;

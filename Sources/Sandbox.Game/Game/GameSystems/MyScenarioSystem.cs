@@ -383,6 +383,7 @@ namespace Sandbox.Game.GameSystems
                         MySandboxGame.Log.WriteLine(string.Format("Obtained details: Id={4}; Result={0}; ugcHandle={1}; title='{2}'; tags='{3}'", data.Result, data.FileHandle, data.Title, data.Tags, data.PublishedFileId));
                         if (!ioFailure && data.Result == Result.OK && data.Tags.Length != 0)
                         {
+#if !XB1 // XB1_NOWORKSHOP
                             m_newWorkshopMap.Title = data.Title;
                             m_newWorkshopMap.PublishedFileId = data.PublishedFileId;
                             m_newWorkshopMap.Description = data.Description;
@@ -391,6 +392,9 @@ namespace Sandbox.Game.GameSystems
                             m_newWorkshopMap.TimeUpdated = data.TimeUpdated;
                             m_newWorkshopMap.Tags = data.Tags.Split(',');
                             Static.EndAction += EndActionLoadWorkshop;
+#else // XB1
+                            System.Diagnostics.Debug.Assert(false); // TODO?
+#endif // XB1
                         }
                         else
                         {
@@ -436,6 +440,7 @@ namespace Sandbox.Game.GameSystems
             LoadMission(m_newPath, false, MyOnlineModeEnum.OFFLINE, 1);
         }
 
+#if !XB1 // XB1_NOWORKSHOP
         private static MySteamWorkshop.SubscribedItem m_newWorkshopMap = new MySteamWorkshop.SubscribedItem();
         private static void EndActionLoadWorkshop()
         {
@@ -453,6 +458,7 @@ namespace Sandbox.Game.GameSystems
                                 messageCaption: MyTexts.Get(MyCommonTexts.ScreenCaptionWorkshop)));
             });
         }
+#endif // !XB1
 
         private struct CheckpointData
         {
@@ -556,10 +562,11 @@ namespace Sandbox.Game.GameSystems
             LoadMission(checkpointData);
         }
 
+
         private static void LoadMission(CheckpointData data)
         {
             var checkpoint = data.Checkpoint;
-            MySteamWorkshop.DownloadModsAsync(checkpoint.Mods, delegate(bool success)
+            MySteamWorkshop.DownloadModsAsync(checkpoint.Mods, delegate(bool success,string mismatchMods)
             {
                 if (success || (checkpoint.Settings.OnlineMode == MyOnlineModeEnum.OFFLINE) && MySteamWorkshop.CanRunOffline(checkpoint.Mods))
                 {
@@ -568,22 +575,25 @@ namespace Sandbox.Game.GameSystems
                     MyScreenManager.CloseAllScreensNowExcept(null);
                     MyGuiSandbox.Update(VRage.Game.MyEngineConstants.UPDATE_STEP_SIZE_IN_MILLISECONDS);
 
-                    // May be called from gameplay, so we must make sure we unload the current game
-                    if (MySession.Static != null)
+                    MyGuiScreenLoadSandbox.CheckMismatchmods(mismatchMods, callback: delegate(VRage.Game.ModAPI.ResultEnum val)
                     {
-                        MySession.Static.Unload();
-                        MySession.Static = null;
-                    }
+                        // May be called from gameplay, so we must make sure we unload the current game
+                        if (MySession.Static != null)
+                        {
+                            MySession.Static.Unload();
+                            MySession.Static = null;
+                        }
 
-                    //seed 0 has special meaning - please randomize at mission start. New seed will be saved and game will run with it ever since.
-                    //  if you use this, YOU CANNOT HAVE ANY PROCEDURAL ASTEROIDS ALREADY SAVED
-                    if (checkpoint.Settings.ProceduralSeed == 0)
-                        checkpoint.Settings.ProceduralSeed = MyRandom.Instance.Next();
+                        //seed 0 has special meaning - please randomize at mission start. New seed will be saved and game will run with it ever since.
+                        //  if you use this, YOU CANNOT HAVE ANY PROCEDURAL ASTEROIDS ALREADY SAVED
+                        if (checkpoint.Settings.ProceduralSeed == 0)
+                            checkpoint.Settings.ProceduralSeed = MyRandom.Instance.Next();
 
-                    MyGuiScreenGamePlay.StartLoading(delegate
-                    {
-                        checkpoint.Settings.Scenario = true;
-                        MySession.LoadMission(data.SessionPath, checkpoint, data.CheckpointSize, data.PersistentEditMode);
+                        MyGuiScreenGamePlay.StartLoading(delegate
+                        {
+                            checkpoint.Settings.Scenario = true;
+                            MySession.LoadMission(data.SessionPath, checkpoint, data.CheckpointSize, data.PersistentEditMode);
+                        });
                     });
                 }
                 else

@@ -177,7 +177,7 @@ namespace VRageRender
         internal void UpdateEntity(MyActor actor)
         {
             //var matrix = actor.WorldMatrix;
-            //matrix.Translation = matrix.Translation - MyEnvironment.CameraPosition;
+            //matrix.Translation = matrix.Translation - MyRender11.Environment.CameraPosition;
             m_mergeGroup.UpdateEntity(actor, ref actor.WorldMatrix, actor.GetRenderable().m_depthBias);
         }
 
@@ -498,9 +498,12 @@ namespace VRageRender
             var model = child.GetRenderable().GetModel();
             var material = MyMeshes.GetMeshPart(model, 0, 0).Info.Material;
 
+            MeshPartId part1;
+            bool AreMultipleParts = MyMeshes.TryGetMeshPart(model, 0, 1, out part1);
+
             bool fracture = model.Info.RuntimeGenerated || model.Info.Dynamic;
 
-            if (MyMeshMaterials1.IsMergable(material) && MyBigMeshTable.Table.IsMergable(model) && !fracture)
+            if (MyMeshMaterials1.IsMergable(material) && MyBigMeshTable.Table.IsMergable(model) && !fracture && !AreMultipleParts)
             {
                 child.GetGroupLeaf().Mergeable = true;
 

@@ -4,7 +4,11 @@ using System.Diagnostics;
 namespace VRageRender
 {
     [PooledObject]
+#if XB1
+    class MyForwardPass : MyRenderingPass, IMyPooledObjectCleaner
+#else // !XB1
     class MyForwardPass : MyRenderingPass
+#endif // !XB1
     {
         internal DepthStencilView DSV;
         internal RenderTargetView RTV;
@@ -24,7 +28,7 @@ namespace VRageRender
             RC.SetDS(null);
         }
 
-        protected unsafe override sealed void RecordCommandsInternal(MyRenderableProxy proxy, int section)
+        protected unsafe override sealed void RecordCommandsInternal(MyRenderableProxy proxy)
         {
 			if ((proxy.Mesh.Buffers.IB == IndexBufferId.NULL && proxy.MergedMesh.Buffers.IB == IndexBufferId.NULL) ||
                 proxy.DrawSubmesh.IndexCount == 0 ||
@@ -134,11 +138,18 @@ namespace VRageRender
             RC.EndProfilingBlock();
         }
 
+#if XB1
+        public void ObjectCleaner()
+        {
+            Cleanup();
+        }
+#else // !XB1
         [PooledObjectCleaner]
         public static void Cleanup(MyForwardPass pass)
         {
             pass.Cleanup();
         }
+#endif // !XB1
 
         internal override void Cleanup()
         {

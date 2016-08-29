@@ -15,7 +15,7 @@ using Sandbox.Game.GameSystems.Conveyors;
 using Sandbox.Game.Gui;
 using Sandbox.Game.Multiplayer;
 using Sandbox.Game.World;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using Sandbox.ModAPI.Interfaces;
 using System;
 using System.Collections.Generic;
@@ -161,11 +161,18 @@ namespace Sandbox.Game.Entities
         bool m_retryAttachPilot = false;
 
         long? m_attachedCharacterIdSaved;
+
+        bool m_pilotFirstPerson = false;
         #endregion
 
         #region Init
         public MyCockpit()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_pilotRelativeWorld = SyncType.CreateAndAddProp<Matrix?>();
+            m_attachedCharacterId = SyncType.CreateAndAddProp<long?>();
+            m_storeOriginalPlayerWorldMatrix = SyncType.CreateAndAddProp<bool>();
+#endif // XB1
             m_pilotClosedHandler = new Action<MyEntity>(m_pilot_OnMarkForClose);
             ResourceSink = new MyResourceSinkComponent(2);
 
@@ -626,6 +633,8 @@ namespace Sandbox.Game.Entities
                             float oxygenAmount = oxygenContainer.GasLevel * physicalItem.Capacity;
 
                             float transferredAmount = Math.Min(oxygenAmount, OxygenAmountMissing);
+                            if (transferredAmount == 0)
+                                continue;
                             oxygenContainer.GasLevel = (oxygenAmount - transferredAmount) / physicalItem.Capacity;
 
                             if (oxygenContainer.GasLevel < 0f)
@@ -838,8 +847,11 @@ namespace Sandbox.Game.Entities
 
                 if (MySession.Static.CameraController == this && pilot == MySession.Static.LocalCharacter)
                 {
-                    MySession.Static.SetCameraController(MyCameraControllerEnum.Entity, pilot);
-                }   
+                    bool isInFirstPerson = IsInFirstPersonView;
+                    MySession.Static.SetCameraController(MyCameraControllerEnum.Entity, pilot);                
+                }
+                pilot.IsInFirstPersonView = m_pilotFirstPerson;
+
                 return true;
             }
             else
@@ -937,20 +949,6 @@ namespace Sandbox.Game.Entities
         private void UpdateNearFlag()
         {
             Render.NearFlag = MySession.Static.CameraController == this && (IsInFirstPersonView || ForceFirstPersonCamera);
-        }
-
-        public override void SwitchThrusts()
-        {
-            base.SwitchThrusts();
-            if (m_pilot != null && m_enableShipControl)
-            {
-                var jetpack = m_pilot.JetpackComp;
-                if (jetpack != null)
-                {
-                    jetpack.SwitchThrusts();
-                    m_pilotJetpackEnabledBackup = null;
-                }
-            }
         }
 
         protected virtual void UpdateCockpitModel()
@@ -1133,7 +1131,7 @@ namespace Sandbox.Game.Entities
             {
                 BlockDefinition.CharacterAnimation = null;
             }
-
+            m_pilotFirstPerson = pilot.IsInFirstPersonView;
             PlacePilotInSeat(pilot);
             m_pilot.SuitBattery.ResourceSink.TemporaryConnectedEntity = this;
             m_rechargeSocket.PlugIn(m_pilot.SuitBattery.ResourceSink);
@@ -1168,9 +1166,10 @@ namespace Sandbox.Game.Entities
             }
 
             m_lastPilot = pilot;
-            if (GetInCockpitSound != MySoundPair.Empty)
+            if (GetInCockpitSound != MySoundPair.Empty && !calledFromInit)
                 PlayUseSound(true);
             m_playIdleSound = true;
+
         }
 
         protected virtual void PlacePilotInSeat(MyCharacter pilot)
@@ -1347,7 +1346,8 @@ namespace Sandbox.Game.Entities
         {
             if (MyCubeBuilder.Static.IsActivated)
             {
-                MyCubeBuilder.Static.Deactivate();
+                //MyCubeBuilder.Static.Deactivate();
+                MySession.Static.GameFocusManager.Clear();
             }
             base.RemoveLocal();
             RemovePilot();

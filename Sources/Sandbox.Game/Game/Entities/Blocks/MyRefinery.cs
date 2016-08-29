@@ -10,7 +10,7 @@ using Sandbox.Game.Multiplayer;
 using VRage.Utils;
 using Sandbox.Game.GameSystems;
 using VRage;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using Sandbox.Game.Localization;
 using VRage.ObjectBuilders;
 using System;
@@ -267,11 +267,12 @@ namespace Sandbox.Game.Entities.Cube
                         }
                     }
 
-                    //Changed by Gregory: This assertion happens on last item to be removed when allowing duplicate blueprints. The queue is emptied but with small delay. Synchronization needed?
+                    //GR: This assertion happens on last item to be removed when allowing duplicate blueprints. The queue is emptied but with small delay. Synchronization needed?
                     //Debug.Assert(blueprintsProcessed > 0, "No items in inventory but there are blueprints in the queue!");
                     if (blueprintsProcessed == 0)
                     {
-                        MySandboxGame.Log.WriteLine("MyRefinery.ProcessQueueItems: Inventory empty while there are still blueprints in the queue!");
+                        //GR: For now comment out bcause it spams the log on servers on occasions
+                        //MySandboxGame.Log.WriteLine("MyRefinery.ProcessQueueItems: Inventory empty while there are still blueprints in the queue!");
                         m_queueNeedsRebuild = true;
                         break;
                     }
@@ -293,10 +294,21 @@ namespace Sandbox.Game.Entities.Cube
         {
             Debug.Assert(Sync.IsServer);
 
+            if(Sync.IsServer == false)
+            {
+                return;
+            }
+
+            if (queueItem == null || queueItem.Prerequisites == null || OutputInventory == null || queueItem.Results == null) 
+            {
+                return;
+            }
+
             if (!MySession.Static.CreativeMode)
             {
                 blueprintAmount = MyFixedPoint.Min(OutputInventory.ComputeAmountThatFits(queueItem), blueprintAmount);
             }
+
             if (blueprintAmount == 0)
                 return;
 

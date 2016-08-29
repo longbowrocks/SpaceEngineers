@@ -136,12 +136,14 @@ namespace Sandbox.Game.AI
                 m_processQueue = new MyConcurrentQueue<AgentSpawnData>();
                 m_lock = new FastResourceLock();
 
+#if !XB1
                 if (MyFakes.ENABLE_BEHAVIOR_TREE_TOOL_COMMUNICATION)
                 {
                     MyMessageLoop.AddMessageHandler(MyWMCodes.BEHAVIOR_GAME_UPLOAD_TREE, OnUploadNewTree);
                     MyMessageLoop.AddMessageHandler(MyWMCodes.BEHAVIOR_GAME_STOP_SENDING, OnBreakDebugging);
                     MyMessageLoop.AddMessageHandler(MyWMCodes.BEHAVIOR_GAME_RESUME_SENDING, OnResumeDebugging);
                 }
+#endif
 
                 MyToolbarComponent.CurrentToolbar.SelectedSlotChanged += CurrentToolbar_SelectedSlotChanged;
                 MyToolbarComponent.CurrentToolbar.SlotActivated += CurrentToolbar_SlotActivated;
@@ -166,6 +168,7 @@ namespace Sandbox.Game.AI
 
             var ob = (MyObjectBuilder_AIComponent)sessionComponentBuilder;
 
+            if (ob.BotBrains != null)
             foreach (var brain in ob.BotBrains)
             {
                 m_loadedBotObjectBuildersByHandle[brain.PlayerHandle] = brain.BotBrain;
@@ -282,12 +285,14 @@ namespace Sandbox.Game.AI
                 m_botCollection = null;
                 m_pathfinding = null;
 
+#if !XB1
                 if (MyFakes.ENABLE_BEHAVIOR_TREE_TOOL_COMMUNICATION)
                 {
                     MyMessageLoop.RemoveMessageHandler(MyWMCodes.BEHAVIOR_GAME_UPLOAD_TREE, OnUploadNewTree);
                     MyMessageLoop.RemoveMessageHandler(MyWMCodes.BEHAVIOR_GAME_STOP_SENDING, OnBreakDebugging);
                     MyMessageLoop.RemoveMessageHandler(MyWMCodes.BEHAVIOR_GAME_RESUME_SENDING, OnResumeDebugging);
                 }
+#endif
 
                 if (MyToolbarComponent.CurrentToolbar != null)
                 {
@@ -320,9 +325,9 @@ namespace Sandbox.Game.AI
             return SpawnNewBotInternal(agentDefinition, spawnPosition, false);
         }
 
-        public int SpawnNewBot(MyAgentDefinition agentDefinition, Vector3D position)
+        public int SpawnNewBot(MyAgentDefinition agentDefinition, Vector3D position, bool createdByPlayer = true)
         {
-            return SpawnNewBotInternal(agentDefinition, position, true);
+            return SpawnNewBotInternal(agentDefinition, position, createdByPlayer);
         }
 
         public bool SpawnNewBotGroup(string type, List<AgentGroupData> groupData, List<int> outIds)
@@ -521,6 +526,10 @@ namespace Sandbox.Game.AI
             var createdByPlayer = false;
             MyBotDefinition botDefinition = null;
             AgentSpawnData spawnData = default(AgentSpawnData);
+
+            // We have to get the bot object builder and bot definition somehow
+            // Either, the bot is being spawned on this computer and the definition was saved in the spawn data
+            // or the bot is just being created from the object builder (MP bot creation, etc.), so the definition is there
             if (isBotSpawned)
             {
                 spawnData = m_agentsToSpawn[playerNumber];
@@ -690,7 +699,7 @@ namespace Sandbox.Game.AI
                     closestValidHit = hitInfo;
                     break;
                 }
-                else if (ent is MyVoxelMap)
+                else if (ent is MyVoxelBase)
                 {
                     closestValidHit = hitInfo;
                     break;
@@ -774,8 +783,10 @@ namespace Sandbox.Game.AI
                     m_botCollection.CheckCompatibilityWithBots(behaviorTree);
                 }
                 IntPtr toolWindowHandle = IntPtr.Zero;
+#if !XB1
                 if (m_behaviorTreeCollection.TryGetValidToolWindow(out toolWindowHandle))
                     WinApi.PostMessage(toolWindowHandle, MyWMCodes.BEHAVIOR_TOOL_TREE_UPLOAD_SUCCESS, IntPtr.Zero, IntPtr.Zero);
+#endif // !XB1
             }
         }
 

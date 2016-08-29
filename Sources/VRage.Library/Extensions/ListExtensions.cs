@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Linq;
+using VRage.Library.Collections;
 
 namespace System.Collections.Generic
 {
@@ -12,14 +13,14 @@ namespace System.Collections.Generic
     // TODO: OP! Create one generic IL, per-type is not necessary
     static class ListInternalAccessor<T>
     {
-#if !UNSHARPER
+#if !XB1 // XB1_LISTEXTENSIONS_NOEMIT - this used to be #if !UNSHARPER
 		public static Func<List<T>, T[]> GetArray;
 		public static Action<List<T>, int> SetSize;
 #endif
 
         static ListInternalAccessor()
         {
-#if UNSHARPER
+#if XB1 // XB1_LISTEXTENSIONS_NOEMIT - this used to be #if UNSHARPER
 
 #else
                 var dm = new DynamicMethod("get", MethodAttributes.Static | MethodAttributes.Public, CallingConventions.Standard, typeof(T[]), new Type[] { typeof(List<T>) }, typeof(ListInternalAccessor<T>), true);
@@ -92,10 +93,20 @@ namespace System.Collections.Generic
             return list.ToArray();
         }
 #else
+#if XB1 // XB1_LISTEXTENSIONS_NOEMIT
+        public static T[] GetInternalArray<T>(this List<T> list)
+        {
+            var field = list.GetType().GetField("_items",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            return (T[])field.GetValue(list);
+        }
+#else // !XB1
         public static T[] GetInternalArray<T>(this List<T> list)
         {
             return ListInternalAccessor<T>.GetArray(list);
         }
+#endif // !XB1
 #endif
 
         public static void AddOrInsert<T>(this List<T> list, T item, int index)
@@ -124,7 +135,18 @@ namespace System.Collections.Generic
             }
 
             Array.Copy(itemsToAdd, 0, list.GetInternalArray(), list.Count, itemCount);
+#if XB1 // XB1_LISTEXTENSIONS_NOEMIT
+            var sizeField = list.GetType().GetField("_size",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            sizeField.SetValue(list, list.Count + itemCount);
+            var versionField = list.GetType().GetField("_version",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            versionField.SetValue(list, (int)versionField.GetValue(list) + 1);
+#else // !XB1
             ListInternalAccessor<T>.SetSize(list, list.Count + itemCount);
+#endif // !XB1
         }
 #endif
 
@@ -157,7 +179,18 @@ namespace System.Collections.Generic
 #else
 		public static void SetSize<T>(this List<T> list, int newSize)
         {
+#if XB1 // XB1_LISTEXTENSIONS_NOEMIT
+            var sizeField = list.GetType().GetField("_size",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            sizeField.SetValue(list, newSize);
+            var versionField = list.GetType().GetField("_version",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            versionField.SetValue(list, (int)versionField.GetValue(list) + 1);
+#else // !XB1
             ListInternalAccessor<T>.SetSize(list, newSize);
+#endif // !XB1
         }
 #endif
         public static void AddList<T>(this List<T> list, List<T> itemsToAdd)
@@ -238,12 +271,12 @@ namespace System.Collections.Generic
          * 
          * Return range: [0, Length]
          */
-        public static int BinaryIntervalSearch<T>(this List<T> self, T value) where T : IComparable<T>
+        public static int BinaryIntervalSearch<T>(this IList<T> self, T value) where T : IComparable<T>
         {
             if (self.Count == 0) return 0;
             if (self.Count == 1)
             {
-                return value.CompareTo(self[0]) > 0 ? 1 : 0;
+                return value.CompareTo(self[0]) >= 0 ? 1 : 0;
             }
 
             int mid;
@@ -253,7 +286,7 @@ namespace System.Collections.Generic
             {
                 mid = (start + end) / 2;
 
-                if (value.CompareTo(self[mid]) > 0)
+                if (value.CompareTo(self[mid]) >= 0)
                 {
                     start = mid;
                 }
@@ -266,12 +299,17 @@ namespace System.Collections.Generic
             int ret = start;
 
             // end of array;
-            if (value.CompareTo(self[start]) > 0)
+            if (value.CompareTo(self[start]) >= 0)
             {
                 ret = end;
             }
 
             return ret;
+        }
+
+        public static MyRangeIterator<T>.Enumerable Range<T>(this List<T> array, int start, int end)
+        {
+            return MyRangeIterator<T>.ForRange(array, start, end);
         }
 
         public static void InsertInOrder<T>(this List<T> self, T value, IComparer<T> comparer)

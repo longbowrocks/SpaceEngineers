@@ -386,11 +386,15 @@ namespace Sandbox.Game.Gui
                                        m_sphereMatrix.Forward.X, m_sphereMatrix.Forward.Y, m_sphereMatrix.Forward.Z,
                                        m_sphereMatrix.Up.X, m_sphereMatrix.Up.Y, m_sphereMatrix.Up.Z });
                         m_string = sb.ToString();
-
+#if !XB1
                         Thread thread = new Thread(() => System.Windows.Forms.Clipboard.SetText(m_string));
                         thread.SetApartmentState(ApartmentState.STA);
                         thread.Start();
                         thread.Join();
+#else
+                        Debug.Assert(false, "Not Clipboard support on XB1!");
+#endif
+                        
 
                         success = true;
                         break;
@@ -436,10 +440,10 @@ namespace Sandbox.Game.Gui
 
         private bool EmitTestAction()
         {
-            /*if (TestAction != null)
-                TestAction();*/
+            if (TestAction != null)
+                TestAction();
 
-            MyFakes.REPLAY_NAVMESH_GENERATION_TRIGGER = !MyFakes.REPLAY_NAVMESH_GENERATION_TRIGGER;
+            //MyFakes.REPLAY_NAVMESH_GENERATION_TRIGGER = !MyFakes.REPLAY_NAVMESH_GENERATION_TRIGGER;
 
             return true;
         }
@@ -1115,7 +1119,7 @@ namespace Sandbox.Game.Gui
 
         private bool AddBot()
         {
-            var barbarianBehavior = MyDefinitionManager.Static.GetBotDefinition(new MyDefinitionId(typeof(VRage.Game.ObjectBuilders.AI.Bot.MyObjectBuilder_AnimalBot), "Cyberhound")) as MyAgentDefinition;
+            var barbarianBehavior = MyDefinitionManager.Static.GetBotDefinition(new MyDefinitionId(typeof(VRage.Game.ObjectBuilders.AI.Bot.MyObjectBuilder_AnimalBot), "Wolf")) as MyAgentDefinition;
             MyAIComponent.Static.SpawnNewBot(barbarianBehavior);
 
             return true;

@@ -21,7 +21,7 @@ using VRage.ModAPI;
 namespace Sandbox.Game.Entities
 {
     [MyCubeBlockType(typeof(MyObjectBuilder_BatteryBlock))]
-    public class MyBatteryBlock : MyFunctionalBlock, Sandbox.ModAPI.Ingame.IMyBatteryBlock
+    public class MyBatteryBlock : MyFunctionalBlock, ModAPI.IMyBatteryBlock
     {
         static readonly string[] m_emissiveNames = new string[] { "Emissive0", "Emissive1", "Emissive2", "Emissive3" };
 
@@ -88,7 +88,7 @@ namespace Sandbox.Game.Entities
             set
             {
                 m_semiautoEnabled.Value = value;
-                
+
                 if(!OnlyRecharge && !OnlyDischarge)
                 {
                     if (CurrentStoredPower == 0)
@@ -104,8 +104,10 @@ namespace Sandbox.Game.Entities
             get { return m_onlyRecharge.Value; }
             set
             {
+                if (value)
+                    OnlyDischarge = false;
                 m_onlyRecharge.Value = value;
-                m_producerEnabled.Value = !value;          
+                m_producerEnabled.Value = !value;
             }
         }
 
@@ -114,6 +116,8 @@ namespace Sandbox.Game.Entities
             get { return m_onlyDischarge.Value; }
             set
             {
+                if (value)
+                    OnlyRecharge = false;
                 m_onlyDischarge.Value = value;
             }
         }
@@ -125,6 +129,14 @@ namespace Sandbox.Game.Entities
 
         public MyBatteryBlock()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_isFull = SyncType.CreateAndAddProp<bool>();
+            m_onlyRecharge = SyncType.CreateAndAddProp<bool>();
+            m_onlyDischarge = SyncType.CreateAndAddProp<bool>();
+            m_semiautoEnabled = SyncType.CreateAndAddProp<bool>();
+            m_producerEnabled = SyncType.CreateAndAddProp<bool>();
+            m_storedPower = SyncType.CreateAndAddProp<float>();
+#endif // XB1
             CreateTerminalControls();
 
             SourceComp = new MyResourceSourceComponent();
@@ -200,9 +212,9 @@ namespace Sandbox.Game.Entities
 
             m_storedPower.Value = CurrentStoredPower;
 
-            OnlyRecharge = !batteryBuilder.ProducerEnabled;
 			
             SemiautoEnabled = batteryBuilder.SemiautoEnabled;
+            OnlyRecharge = !batteryBuilder.ProducerEnabled;
             OnlyDischarge = batteryBuilder.OnlyDischargeEnabled;
             UpdateMaxOutputAndEmissivity();
 

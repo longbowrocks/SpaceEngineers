@@ -18,6 +18,7 @@ using System.Text;
 using Sandbox.Game.EntityComponents;
 using VRage.Game;
 using IMyLandingGear = Sandbox.Game.Entities.Interfaces.IMyLandingGear;
+using Sandbox.Game.Multiplayer;
 
 #endregion
 
@@ -71,7 +72,7 @@ namespace Sandbox.Game.Entities.Cube
             ControlSystem = new MyGroupControlSystem();
             CameraSystem = new MyGridCameraSystem(m_cubeGrid);
 
-            if (MySession.Static.Settings.EnableOxygen)
+            if (MySession.Static.Settings.EnableOxygen && MySession.Static.Settings.EnableOxygenPressurization)
             {
                 GasSystem = new MyGridGasSystem(m_cubeGrid);
             }
@@ -98,7 +99,7 @@ namespace Sandbox.Game.Entities.Cube
                 m_cubeGrid.SetHandbrakeRequest(builder.Handbrake);
             }
 
-            if (MySession.Static.Settings.EnableOxygen)
+            if (MySession.Static.Settings.EnableOxygen && MySession.Static.Settings.EnableOxygenPressurization)
             {
                 GasSystem.Init(builder.OxygenAmount);
             }
@@ -137,7 +138,7 @@ namespace Sandbox.Game.Entities.Cube
 			ProfilerShort.Begin("Thrusters");
 	        MyEntityThrustComponent thrustComp;
 			if(CubeGrid.Components.TryGet(out thrustComp))
-				thrustComp.UpdateBeforeSimulation();
+                thrustComp.UpdateBeforeSimulation(false, Sync.IsServer || CubeGrid.GridSystems.ControlSystem.IsLocallyControlled);
             ProfilerShort.End();
 
             // Only update gyros if there are gyros in the system
@@ -167,7 +168,7 @@ namespace Sandbox.Game.Entities.Cube
             CameraSystem.UpdateBeforeSimulation();
             ProfilerShort.End();
 
-            if (MySession.Static.Settings.EnableOxygen)
+            if (MySession.Static.Settings.EnableOxygen && MySession.Static.Settings.EnableOxygenPressurization)
             {
                 ProfilerShort.Begin("Oxygen");
                 GasSystem.UpdateBeforeSimulation();
@@ -214,7 +215,7 @@ namespace Sandbox.Game.Entities.Cube
 
         public virtual void UpdateBeforeSimulation100()
         {
-            if (MySession.Static.Settings.EnableOxygen)
+            if (MySession.Static.Settings.EnableOxygen && MySession.Static.Settings.EnableOxygenPressurization)
             {
                 GasSystem.UpdateBeforeSimulation100();
             }
@@ -240,7 +241,7 @@ namespace Sandbox.Game.Entities.Cube
             if (WheelSystem != null)
                 ob.Handbrake = WheelSystem.HandBrake;
 
-            if (MySession.Static.Settings.EnableOxygen)
+            if (MySession.Static.Settings.EnableOxygen && MySession.Static.Settings.EnableOxygenPressurization)
             {
                 ob.OxygenAmount = GasSystem.GetOxygenAmount();
             }
@@ -446,7 +447,7 @@ namespace Sandbox.Game.Entities.Cube
                 ConveyorSystem.DebugDrawLinePackets();
             }
 
-            if (MySession.Static.Settings.EnableOxygen && MyDebugDrawSettings.DEBUG_DRAW_OXYGEN)
+            if (MySession.Static.Settings.EnableOxygen && MySession.Static.Settings.EnableOxygenPressurization && MyDebugDrawSettings.DEBUG_DRAW_OXYGEN)
             {
                 GasSystem.DebugDraw();
             }
@@ -650,9 +651,11 @@ namespace Sandbox.Game.Entities.Cube
             // Include the batteries for total power shutdown
             foreach (var block in CubeGrid.GetBlocks())
             {
-                if (block != null && block.FatBlock is MyBatteryBlock)
+                //GR: Do the same for solar panels too. Issue: solar panels are in SpaceEngineers assembly not Sanbox so cannot access them from here. Workaround is to get DisplayName.
+                //Best solution would be to move GridSystem to SpaceEngineers. Also for this to work MySolarPanel is now a MyFunctionalBlock (can be toggled on /off).
+                if (block != null && block.FatBlock != null && (block.FatBlock is MyBatteryBlock || block.FatBlock.DefinitionDisplayNameText.Equals("Solar Panel")))
                 {
-                    ((MyBatteryBlock)block.FatBlock).Enabled = enabledState == MyMultipleEnabledEnum.AllEnabled ? true : false;
+                    ((MyFunctionalBlock)block.FatBlock).Enabled = enabledState == MyMultipleEnabledEnum.AllEnabled ? true : false;
                 }
             }
             if (ResourceDistributor != null)

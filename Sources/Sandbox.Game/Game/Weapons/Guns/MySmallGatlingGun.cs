@@ -21,7 +21,7 @@ using VRage;
 using Sandbox.ModAPI.Interfaces;
 using Sandbox.Game.Components;
 using Sandbox.Game.EntityComponents;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using Sandbox.Game.Localization;
 using VRage.ModAPI;
 using VRage.Game.Components;
@@ -84,6 +84,9 @@ namespace Sandbox.Game.Weapons
 
         public MySmallGatlingGun()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_useConveyorSystem = SyncType.CreateAndAddProp<bool>();
+#endif // XB1
             CreateTerminalControls();
 
             m_rotationAngle = MyUtils.GetRandomRadian();
@@ -95,7 +98,11 @@ namespace Sandbox.Game.Weapons
 
             m_soundEmitter = new MyEntity3DSoundEmitter(this, true);
 
+#if XB1// XB1_SYNC_NOREFLECTION
+            m_gunBase = new MyGunBase(SyncType);
+#else // !XB1
             m_gunBase = new MyGunBase();         
+#endif // !XB1
 
             NeedsUpdate |= MyEntityUpdateEnum.EACH_FRAME | MyEntityUpdateEnum.EACH_10TH_FRAME;
             Render.NeedsDrawFromParent = true;
@@ -103,7 +110,9 @@ namespace Sandbox.Game.Weapons
             Render = new MyRenderComponentSmallGatlingGun();
             AddDebugRenderComponent(new MyDebugRenderComponentSmallGatlingGun(this));
 
+#if !XB1 // !XB1_SYNC_NOREFLECTION
             SyncType.Append(m_gunBase);
+#endif // !XB1
         }
 
         static void CreateTerminalControls()
@@ -257,7 +266,7 @@ namespace Sandbox.Game.Weapons
         public override void UpdateAfterSimulation()
         {
             base.UpdateAfterSimulation();
-
+         
             Debug.Assert(PositionComp != null, "MySmallGatlingGun Cubegrid is null");
             if (PositionComp == null)
                 return;
@@ -271,7 +280,7 @@ namespace Sandbox.Game.Weapons
             {
                 Debug.Assert(m_barrel.PositionComp != null, "MySmallGatlingGun barrel PositionComp is null");
                 if (m_barrel.PositionComp != null)
-                    m_barrel.PositionComp.LocalMatrix = Matrix.CreateRotationY(rotationAngle) * m_barrel.PositionComp.LocalMatrix;
+                m_barrel.PositionComp.LocalMatrix = Matrix.CreateRotationY(rotationAngle) * m_barrel.PositionComp.LocalMatrix;
             }
 
             //  Handle 'motor loop and motor end' cues
@@ -287,6 +296,7 @@ namespace Sandbox.Game.Weapons
             }
 
             //  If gun fires too much, we start generating smokes at the muzzle
+            /*
             if ((MySandboxGame.TotalGamePlayTimeInMilliseconds - m_smokeLastTime) >= (MyGatlingConstants.SMOKES_INTERVAL_IN_MILISECONDS))
             {
                 m_smokeLastTime = MySandboxGame.TotalGamePlayTimeInMilliseconds;
@@ -304,7 +314,7 @@ namespace Sandbox.Game.Weapons
                         }
                     }
                 }
-            }
+            }*/
 
             if (m_smokeEffect != null)
             {
@@ -394,6 +404,12 @@ namespace Sandbox.Game.Weapons
                 return false;
             }
 
+            if (Parent.Physics == null)
+            {
+                status = MyGunStatusEnum.Failed;
+                return false;
+            }
+
             if (!m_gunBase.HasAmmoMagazines)
             {
                 status = MyGunStatusEnum.Failed;
@@ -439,14 +455,14 @@ namespace Sandbox.Game.Weapons
         }
 
         public void Shoot(MyShootActionEnum action, Vector3 direction, Vector3D? overrideWeaponPos, string gunAction)
-        {
+        {            
             // Don't shoot when the grid doesn't have physics.
             if (Parent.Physics == null)
                 return;
 
             //  Angle of muzzle flash particle
-            m_muzzleFlashLength = MyUtils.GetRandomFloat(3, 4);// *m_barrel.GetMuzzleSize();
-            m_muzzleFlashRadius = MyUtils.GetRandomFloat(0.9f, 1.5f);// *m_barrel.GetMuzzleSize();
+            m_muzzleFlashLength = MyUtils.GetRandomFloat(3, 4) * CubeGrid.GridSize ;// *m_barrel.GetMuzzleSize();
+            m_muzzleFlashRadius = MyUtils.GetRandomFloat(0.9f, 1.5f) * CubeGrid.GridSize;// *m_barrel.GetMuzzleSize();
 
             //  Increase count of smokes to draw
             SmokesToGenerateIncrease();
@@ -741,7 +757,7 @@ namespace Sandbox.Game.Weapons
             pullInformation.OwnerID = OwnerId;
             pullInformation.Constraint = pullInformation.Inventory.Constraint;
             return pullInformation;
-        }
+    }
 
         public Sandbox.Game.GameSystems.Conveyors.PullInformation GetPushInformation()
         {

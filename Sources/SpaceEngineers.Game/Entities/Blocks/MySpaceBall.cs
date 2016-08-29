@@ -11,7 +11,7 @@ using Sandbox.Game.Entities.Cube;
 using Sandbox.Game.Gui;
 using Sandbox.Game.Localization;
 using Sandbox.ModAPI.Ingame;
-using SpaceEngineers.Game.ModAPI.Ingame;
+using SpaceEngineers.Game.ModAPI;
 using VRage;
 using VRage.Game;
 using VRage.Game.Components;
@@ -99,6 +99,12 @@ namespace SpaceEngineers.Game.Entities.Blocks
         public MySpaceBall()
             : base()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_friction = SyncType.CreateAndAddProp<float>();
+            m_virtualMass = SyncType.CreateAndAddProp<float>();
+            m_restitution = SyncType.CreateAndAddProp<float>();
+            m_broadcastSync = SyncType.CreateAndAddProp<bool>();
+#endif // XB1
             CreateTerminalControls();
 
             m_baseIdleSound.Init("BlockArtMass");
@@ -328,12 +334,12 @@ namespace SpaceEngineers.Game.Entities.Blocks
             RadioBroadcaster.Enabled = m_broadcastSync;
         }
 
-        float IMyVirtualMass.VirtualMass
+        float ModAPI.Ingame.IMyVirtualMass.VirtualMass
         {
             get { return GetMass(); }
         }
 
-        bool IMySpaceBall.IsBroadcasting
+        bool ModAPI.Ingame.IMySpaceBall.IsBroadcasting
         {
             get { return (RadioBroadcaster == null) ? false : RadioBroadcaster.Enabled; }
         }

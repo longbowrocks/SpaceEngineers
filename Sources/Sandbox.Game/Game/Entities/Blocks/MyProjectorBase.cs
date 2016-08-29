@@ -19,6 +19,7 @@ using System.IO;
 using System.Text;
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI;
+using Sandbox.Game.SessionComponents.Clipboard;
 using VRage;
 using VRage.FileSystem;
 using VRage.Game;
@@ -27,6 +28,7 @@ using VRage.Library.Utils;
 using VRage.ModAPI;
 using VRageMath;
 using VRage.Game.Entity;
+using VRage.Game.ObjectBuilders.Definitions.SessionComponents;
 using VRage.Network;
 
 namespace Sandbox.Game.Entities.Blocks
@@ -52,6 +54,18 @@ namespace Sandbox.Game.Entities.Blocks
         protected Vector3I m_projectionOffset;
         protected Vector3I m_projectionRotation;
 
+        public Vector3I ProjectionOffset { get { return m_projectionOffset; } }
+        public Vector3I ProjectionRotation { get { return m_projectionRotation; } }
+        public Quaternion ProjectionRotationQuaternion
+        {
+            get
+            {
+                Vector3 radians = ProjectionRotation * MathHelper.PiOver2;
+                Quaternion rotation = Quaternion.CreateFromYawPitchRoll(radians.X, radians.Y, radians.Z);
+                return rotation;
+            }
+        }
+
         private MySlimBlock m_hiddenBlock;
 
         private bool m_shouldUpdateProjection = false;
@@ -68,8 +82,15 @@ namespace Sandbox.Game.Entities.Blocks
         public MyProjectorBase()
             : base()
         {
-            m_clipboard = new MyProjectorClipboard(this);
-            m_spawnClipboard = new MyProjectorClipboard(this);
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_keepProjection = SyncType.CreateAndAddProp<bool>();
+            m_instantBuildingEnabled = SyncType.CreateAndAddProp<bool>();
+            m_maxNumberOfProjections = SyncType.CreateAndAddProp<int>();
+            m_maxNumberOfBlocksPerProjection = SyncType.CreateAndAddProp<int>();
+            m_getOwnershipFromProjector = SyncType.CreateAndAddProp<bool>();
+#endif // XB1
+            m_clipboard = new MyProjectorClipboard(this, MyClipboardComponent.ClipboardDefinition.PastingSettings);
+            m_spawnClipboard = new MyProjectorClipboard(this, MyClipboardComponent.ClipboardDefinition.PastingSettings);
 
             m_keepProjection.Value = false;
             m_instantBuildingEnabled.Value = false;
@@ -172,7 +193,7 @@ namespace Sandbox.Game.Entities.Blocks
             }
 
             RemoveProjection(false);
-            var blueprintScreen = new MyGuiBlueprintScreen(m_clipboard);
+            var blueprintScreen = new MyGuiBlueprintScreen(m_clipboard, true);
             blueprintScreen.Closed += OnBlueprintScreen_Closed;
             MyGuiSandbox.AddScreen(blueprintScreen);
 
@@ -615,27 +636,6 @@ namespace Sandbox.Game.Entities.Blocks
         #endregion
 
         #region Update & Events
-        public override void UpdateBeforeSimulation()
-        {
-            base.UpdateBeforeSimulation();
-            
-            if (m_clipboard.IsActive)
-            {
-                m_clipboard.Update();
-
-                if (!MySandboxGame.IsDedicated)
-                {
-                    HideIntersectedBlock();
-                }
-
-                if (m_shouldUpdateProjection)
-                {
-                    UpdateProjection();
-                    m_shouldUpdateProjection = false;
-                }
-            }
-        }
-
         public override void UpdateAfterSimulation()
         {
             base.UpdateAfterSimulation();
@@ -653,6 +653,23 @@ namespace Sandbox.Game.Entities.Blocks
                     }
                     m_frameCount = 0;
                     m_removeRequested = false;
+                }
+            }
+
+
+            if (m_clipboard.IsActive)
+            {
+                m_clipboard.Update();
+
+                if (!MySandboxGame.IsDedicated)
+                {
+                    HideIntersectedBlock();
+                }
+
+                if (m_shouldUpdateProjection)
+                {
+                    UpdateProjection();
+                    m_shouldUpdateProjection = false;
                 }
             }
         }
@@ -1147,21 +1164,20 @@ namespace Sandbox.Game.Entities.Blocks
         {
             MyBlockOrientation blockOrientation = projectedBlock.Orientation;
             
-            Matrix local;
-            blockOrientation.GetMatrix(out local);
-            var gridOrientation = (m_clipboard as MyGridClipboard).GetFirstGridOrientationMatrix();
-            if (gridOrientation != Matrix.Identity)
-            {
-                var afterRotation = Matrix.Multiply(local, gridOrientation);
-                blockOrientation = new MyBlockOrientation(ref afterRotation);
-            }
-            
+            //GR: For rotation take into account:
+            //the projected block orientation
             Quaternion blockOrientationQuat;
             blockOrientation.GetQuaternion(out blockOrientationQuat);
 
+            //GR: The projector block orientation (which is relative to the Cubegrid orientation)
             Quaternion projQuat = Quaternion.Identity;
             Orientation.GetQuaternion(out projQuat);
             blockOrientationQuat = Quaternion.Multiply(projQuat, blockOrientationQuat);
+
+            //GR: The orienation settings of the projector
+            //Take into account order of multiplication to review!
+            blockOrientationQuat = Quaternion.Multiply(ProjectionRotationQuaternion, blockOrientationQuat);
+
 
             Vector3I projectedMin = CubeGrid.WorldToGridInteger(projectedBlock.CubeGrid.GridIntegerToWorld(projectedBlock.Min));
             Vector3I projectedMax = CubeGrid.WorldToGridInteger(projectedBlock.CubeGrid.GridIntegerToWorld(projectedBlock.Max));
@@ -1179,7 +1195,7 @@ namespace Sandbox.Game.Entities.Blocks
             }
 
             MyGridPlacementSettings settings = new MyGridPlacementSettings();
-            settings.Mode = MyGridPlacementSettings.SnapMode.OneFreeAxis;
+            settings.SnapMode = SnapMode.OneFreeAxis;
 
 			var mountPoints = projectedBlock.BlockDefinition.GetBuildProgressModelMountPoints(1.0f);
 			bool isConnected = MyCubeGrid.CheckConnectivity(this.CubeGrid, projectedBlock.BlockDefinition, mountPoints,
@@ -1215,25 +1231,16 @@ namespace Sandbox.Game.Entities.Blocks
             }
         }
 
-        public void Build(MySlimBlock cubeBlock, long owner, long builder)
+        public void Build(MySlimBlock cubeBlock, long owner, long builder, bool requestInstant = true)
         {
             Quaternion quat = Quaternion.Identity;
             var orientation = cubeBlock.Orientation;
 
-            Matrix local;
-            orientation.GetMatrix(out local);
-            var gridOrientation = m_clipboard.GetFirstGridOrientationMatrix();
-            if (gridOrientation != Matrix.Identity)
-            {
-                var afterRotation = Matrix.Multiply(local, gridOrientation);
-                orientation = new MyBlockOrientation(ref afterRotation);
-            }
-
             Quaternion projQuat = Quaternion.Identity;
             Orientation.GetQuaternion(out projQuat);
             orientation.GetQuaternion(out quat);
+            quat = Quaternion.Multiply(ProjectionRotationQuaternion, quat);
             quat = Quaternion.Multiply(projQuat, quat);
-
 
             var projectorGrid = CubeGrid;
             var projectedGrid = cubeBlock.CubeGrid;
@@ -1249,8 +1256,7 @@ namespace Sandbox.Game.Entities.Blocks
             Vector3I projectedMax = new Vector3I(Math.Max(min.X, max.X), Math.Max(min.Y, max.Y), Math.Max(min.Z, max.Z));
 
 
-            MyCubeGrid.MyBlockLocation location = new MyCubeGrid.MyBlockLocation(cubeBlock.BlockDefinition.Id, projectedMin, projectedMax, pos,
-                quat, 0, owner);
+            MyCubeGrid.MyBlockLocation location = new MyCubeGrid.MyBlockLocation(cubeBlock.BlockDefinition.Id, projectedMin, projectedMax, pos, quat, 0, owner);
 
             MyObjectBuilder_CubeBlock objectBuilder = null;
             //Find original grid builder
@@ -1271,8 +1277,8 @@ namespace Sandbox.Game.Entities.Blocks
             }
 
             objectBuilder.ConstructionInventory = null;
-            bool isAdmin = MySession.Static.IsAdminModeEnabled(Sync.MyId);
-            MyMultiplayer.RaiseEvent(projectorGrid, x => x.BuildBlockRequest, cubeBlock.ColorMaskHSV.PackHSVToUint(), location, objectBuilder, builder, isAdmin, owner);
+            bool buildInstant = requestInstant && MySession.Static.IsAdminModeEnabled(Sync.MyId);
+            MyMultiplayer.RaiseEvent(projectorGrid, x => x.BuildBlockRequest, cubeBlock.ColorMaskHSV.PackHSVToUint(), location, objectBuilder, builder, buildInstant, owner);
             HideCube(cubeBlock);
         }
         #endregion
@@ -1317,10 +1323,13 @@ namespace Sandbox.Game.Entities.Blocks
             MyMultiplayer.RaiseEvent(this, x => x.OnNewBlueprintSuccess, projectedGrid);
         }
 
-        [Event, Reliable, Server, Broadcast]
+        [Event, Reliable, Server, BroadcastExcept]
         private void OnNewBlueprintSuccess(MyObjectBuilder_CubeGrid projectedGrid)
         {
-            SetNewBlueprint(projectedGrid);
+            if (MyEventContext.Current.IsLocallyInvoked == false)
+            {
+                SetNewBlueprint(projectedGrid);
+            }
         }
 
         public void SendNewOffset(Vector3I positionOffset, Vector3I rotationOffset, bool showOnlyBuildable)

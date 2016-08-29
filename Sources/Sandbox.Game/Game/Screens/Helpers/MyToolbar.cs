@@ -247,7 +247,7 @@ namespace Sandbox.Game.Screens.Helpers
 
             MyCockpit cockpit = Owner as MyCockpit;
             if (cockpit != null && cockpit.CubeGrid != null)
-                cockpit.CubeGrid.OnBlockRemoved += OnBlockRemoved;
+                cockpit.CubeGrid.OnBlockClosed += OnBlockClosed;
         }
 
         public MyObjectBuilder_Toolbar GetObjectBuilder()
@@ -447,7 +447,7 @@ namespace Sandbox.Game.Screens.Helpers
             Update();
         }
 
-        private void OnBlockRemoved(MySlimBlock block)
+        private void OnBlockClosed(MySlimBlock block)
         {
             if (block.FatBlock == null)
                 return;
@@ -630,15 +630,12 @@ namespace Sandbox.Game.Screens.Helpers
             if (SelectedItem != null && unselectSound)
                 MyGuiAudio.PlaySound(MyGuiSounds.HudClick);
 
-            var controlledObject = MySession.Static.ControlledEntity as IMyControllableEntity;
+                MySession.Static.GameFocusManager.Clear();
+
+            var controlledObject = MySession.Static.ControlledEntity;
             if (controlledObject != null)
                 controlledObject.SwitchToWeapon(null);
-
-            if (MyCubeBuilder.Static.IsActivated)
-            {
-                MyCubeBuilder.Static.Deactivate();
-            }
-
+            
             if (Unselected != null)
                 Unselected(this);
         }

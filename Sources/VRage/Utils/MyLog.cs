@@ -11,6 +11,7 @@ using System.Reflection;
 using SystemTrace = System.Diagnostics.Trace;
 using VRage.Library.Utils;
 using VRage.FileSystem;
+using VRage.Library;
 
 namespace VRage.Utils
 {
@@ -99,7 +100,7 @@ namespace VRage.Utils
         }
 
 
-        public static MyLogSeverity AssertLevel = (MyLogSeverity) (byte.MaxValue);
+        public static MyLogSeverity AssertLevel = (MyLogSeverity)(byte.MaxValue);
         private bool LogForMemoryProfiler = false;
         private bool m_enabled = false;             //  Must be false, beuuase MW web site must not write into log file
         private Stream m_stream;                    //  Used for opening and closing the file
@@ -145,7 +146,7 @@ namespace VRage.Utils
                     m_stream = MyFileSystem.OpenWrite(m_filepath);
                     m_streamWriter = new StreamWriter(m_stream);
                     m_normalWriter = new Action<string>(WriteLine);
-                    m_closedLogWriter = new Action<string>((s) => File.AppendAllText(m_filepath, s + Environment.NewLine));
+                    m_closedLogWriter = new Action<string>((s) => File.AppendAllText(m_filepath, s + MyEnvironment.NewLine));
                     m_enabled = true;
                 }
                 catch (Exception e)
@@ -274,7 +275,7 @@ namespace VRage.Utils
 
         long GetSystemMemory()
         {
-            return Environment.WorkingSet;
+            return MyEnvironment.WorkingSetForMyLog;
         }
 
         //	Must be called before application ends
@@ -307,7 +308,7 @@ namespace VRage.Utils
             }
             else if (m_filepath != null)
             {
-                File.AppendAllText(m_filepath, text + Environment.NewLine);
+                File.AppendAllText(m_filepath, text + MyEnvironment.NewLine);
             }
         }
 
@@ -509,30 +510,48 @@ namespace VRage.Utils
 
         public void Log(MyLogSeverity severity, string format, params object[] args)
         {
-            StringBuilder sb = new StringBuilder();
+            if (m_enabled)
+            {
+                lock (m_lock)
+                {
+                    WriteDateTimeAndThreadId();
 
-            sb.AppendFormat("{0}: ", severity);
-            sb.AppendFormat(format, args);
-            sb.Append('\n');
+                    StringBuilder sb = m_stringBuilder;
+                    sb.Clear();
 
-            WriteStringBuilder(sb);
+                    sb.AppendFormat("{0}: ", severity);
+                    sb.AppendFormat(format, args);
+                    sb.Append('\n');
 
-            if ((int)severity >= (int)AssertLevel)
-                SystemTrace.Fail(sb.ToString());
+                    WriteStringBuilder(sb);
+
+                    if ((int)severity >= (int)AssertLevel)
+                        SystemTrace.Fail(sb.ToString());
+                }
+            }
         }
 
         public void Log(MyLogSeverity severity, StringBuilder builder)
         {
-            StringBuilder sb = new StringBuilder();
+            if (m_enabled)
+            {
+                lock (m_lock)
+                {
+                    WriteDateTimeAndThreadId();
 
-            sb.AppendFormat("{0}: ", severity);
-            sb.AppendStringBuilder(builder);
-            sb.Append('\n');
+                    StringBuilder sb = m_stringBuilder;
+                    sb.Clear();
 
-            WriteStringBuilder(sb);
+                    sb.AppendFormat("{0}: ", severity);
+                    sb.AppendStringBuilder(builder);
+                    sb.Append('\n');
 
-            if ((int)severity >= (int)AssertLevel)
-                SystemTrace.Fail(sb.ToString());
+                    WriteStringBuilder(sb);
+
+                    if ((int)severity >= (int)AssertLevel)
+                        SystemTrace.Fail(sb.ToString());
+                }
+            }
         }
     }
 

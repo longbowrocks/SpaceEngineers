@@ -12,6 +12,7 @@ using System.Text;
 using VRage.Game.ModAPI;
 using VRage.Network;
 using VRage.ObjectBuilders;
+using VRage.Scripting;
 using MyMultiplayerMain = Sandbox.Engine.Multiplayer.MyMultiplayer;
 using Sandbox.Game.Gui;
 
@@ -26,9 +27,11 @@ namespace Sandbox.ModAPI
             MyAPIGateway.Entities = new MyEntitiesHelper_ModAPI();
             MyAPIGateway.Players = Sync.Players;
             MyAPIGateway.CubeBuilder = MyCubeBuilder.Static;
+            MyAPIGateway.IngameScripting = MyIngameScripting.Static;
             MyAPIGateway.TerminalActionsHelper = MyTerminalControlFactoryHelper.Static;
             MyAPIGateway.Utilities = MyAPIUtilities.Static;
             MyAPIGateway.Parallel = MyParallelTask.Static;
+            MyAPIGateway.Physics = Physics.MyPhysics.Static;
             MyAPIGateway.Multiplayer = MyMultiplayer.Static;
             MyAPIGateway.PrefabManager = MyPrefabManager.Static;
             MyAPIGateway.Input = (VRage.ModAPI.IMyInput)VRage.Input.MyInput.Static;

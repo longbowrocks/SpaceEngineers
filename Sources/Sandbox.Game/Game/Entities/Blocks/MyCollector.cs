@@ -14,7 +14,7 @@ using System.Diagnostics;
 using System.Linq;
 using Sandbox.Game.EntityComponents;
 using VRageMath;
-using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI;
 using Sandbox.Game.Localization;
 using VRage.ModAPI;
 using VRage.Game.Components;
@@ -36,6 +36,9 @@ namespace Sandbox.Game.Entities.Blocks
 
         public MyCollector()
         {
+#if XB1 // XB1_SYNC_NOREFLECTION
+            m_useConveyorSystem = SyncType.CreateAndAddProp<bool>();
+#endif // XB1
             CreateTerminalControls();
         }
 

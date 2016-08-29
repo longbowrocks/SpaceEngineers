@@ -15,12 +15,17 @@ using VRage.ObjectBuilders;
 using VRage.Plugins;
 using VRage.Utils;
 using VRage.Collections;
+using VRage.Game.Definitions;
 using VRageMath;
 
 namespace Sandbox.Game.World
 {
     public sealed partial class MySession
     {
+#if XB1 // XB1_ALLINONEASSEMBLY
+        private bool m_registered = false;
+#endif // XB1
+
         #region Components
 
         private class ComponentComparer : IComparer<MySessionComponentBase>
@@ -35,36 +40,45 @@ namespace Sandbox.Game.World
 
         private static readonly ComponentComparer SessionComparer = new ComponentComparer();
 
-        private void PrepareComponents(List<MyObjectBuilder_Checkpoint.ModItem> mods, MyDefinitionId? definition = null)
+        private void PrepareBaseSession(List<MyObjectBuilder_Checkpoint.ModItem> mods, MyScenarioDefinition definition = null)
         {
             ScriptManager.Init(null);
-
             MyDefinitionManager.Static.LoadData(mods);
 
-            LoadGameDefinition(definition);
+            LoadGameDefinition(definition != null ? definition.GameDefinition : MyGameDefinition.Default);
+
+            Scenario = definition;
+            if (definition != null)
+            {
+                WorldBoundaries = definition.WorldBoundaries;
+
+                MySector.EnvironmentDefinition = MyDefinitionManager.Static.GetDefinition<MyEnvironmentDefinition>(definition.Environment);
+            }
+
+            MySector.InitEnvironmentSettings();
 
             LoadDataComponents();
             InitDataComponents();
         }
 
-        private void PrepareComponents(MyObjectBuilder_Checkpoint checkpoint)
+        private void PrepareBaseSession(MyObjectBuilder_Checkpoint checkpoint, MyObjectBuilder_Sector sector)
         {
             ScriptManager.Init(checkpoint.ScriptManagerData);
-
             MyDefinitionManager.Static.LoadData(checkpoint.Mods);
 
             LoadGameDefinition(checkpoint);
 
-            if (!MyDefinitionManager.Static.TryGetDefinition<MyScenarioDefinition>(checkpoint.Scenario, out Static.Scenario))
-                Static.Scenario = MyDefinitionManager.Static.GetScenarioDefinitions().FirstOrDefault();
-            FixIncorrectSettings(Static.Settings);
-            Static.WorldBoundaries = checkpoint.WorldBoundaries;
+            MyDefinitionManager.Static.TryGetDefinition<MyScenarioDefinition>(checkpoint.Scenario, out Scenario);
+
+            FixIncorrectSettings(Settings);
+            WorldBoundaries = checkpoint.WorldBoundaries;
 
             // Use whatever setting is in scenario if there was nothing in the file (0 min and max).
             // SE scenarios have nothing while ME scenarios have size defined.
-            if (Static.WorldBoundaries.Min == Vector3D.Zero &&
-                Static.WorldBoundaries.Max == Vector3D.Zero)
-                Static.WorldBoundaries = Static.Scenario.WorldBoundaries;
+            if (!WorldBoundaries.HasValue && Scenario != null)
+                WorldBoundaries = Scenario.WorldBoundaries;
+
+            MySector.InitEnvironmentSettings(sector.Environment);
 
             LoadDataComponents();
             LoadObjectBuildersComponents(checkpoint.SessionComponents);
@@ -72,8 +86,10 @@ namespace Sandbox.Game.World
 
         private void RegisterComponentsFromAssemblies()
         {
+#if !XB1 // XB1_ALLINONEASSEMBLY
             var execAssembly = Assembly.GetExecutingAssembly();
             var refs = execAssembly.GetReferencedAssemblies();
+#endif // !XB1
 
             // Prepare final session component lists
             m_componentsToLoad = new HashSet<string>();
@@ -81,6 +97,9 @@ namespace Sandbox.Game.World
             m_componentsToLoad.RemoveWhere(x => SessionComponentDisabled.Contains(x));
             m_componentsToLoad.UnionWith(SessionComponentEnabled);
 
+#if XB1 // XB1_ALLINONEASSEMBLY
+            RegisterComponentsFromAssembly(MyAssembly.AllInOneAssembly);
+#else // !XB1
             foreach (var assemblyName in refs)
             {
                 try
@@ -144,6 +163,7 @@ namespace Sandbox.Game.World
             }
 
             RegisterComponentsFromAssembly(execAssembly);
+#endif // !XB1
         }
 
         private readonly CachingDictionary<Type, MySessionComponentBase> m_sessionComponents = new CachingDictionary<Type, MySessionComponentBase>();
@@ -159,7 +179,7 @@ namespace Sandbox.Game.World
         public HashSet<string> SessionComponentDisabled = new HashSet<string>();
 
 
-        public T GetSessionComponent<T>() where T : MySessionComponentBase
+        public T GetComponent<T>() where T : MySessionComponentBase
         {
             MySessionComponentBase comp;
             m_sessionComponents.TryGetValue(typeof(T), out comp);
@@ -185,9 +205,20 @@ namespace Sandbox.Game.World
         {
             if (assembly == null)
                 return;
-            MySandboxGame.Log.WriteLine("Registered modules from: " + assembly.FullName);
 
+#if XB1 // XB1_ALLINONEASSEMBLY
+            MySandboxGame.Log.WriteLine("Registered modules from: N/A (on XB1)");
+
+            System.Diagnostics.Debug.Assert(m_registered == false);
+            if (m_registered == true)
+                return;
+            m_registered = true;
+            foreach (Type type in MyAssembly.GetTypes())
+#else // !XB1
+            MySandboxGame.Log.WriteLine("Registered modules from: " + assembly.FullName);
+            
             foreach (Type type in assembly.GetTypes())
+#endif // !XB1
             {
                 if (Attribute.IsDefined(type, typeof(MySessionComponentDescriptor)))
                 {
@@ -263,15 +294,26 @@ namespace Sandbox.Game.World
             }
         }
 
-        public void RemoveComponentFromUpdate(MySessionComponentBase component)
+        public void SetComponentUpdateOrder(MySessionComponentBase component, MyUpdateOrder order)
         {
             for (int i = 0; i <= 2; ++i)
             {
                 SortedSet<MySessionComponentBase> componentList = null;
-
-                if (m_sessionComponentsForUpdate.TryGetValue((int)i, out componentList))
+                if ((order & (MyUpdateOrder)(1 << i)) != 0)
                 {
-                    componentList.Remove(component);
+                    if (!m_sessionComponentsForUpdate.TryGetValue(1 << i, out componentList))
+                    {
+                        componentList = new SortedSet<MySessionComponentBase>();
+                        m_sessionComponentsForUpdate.Add(i, componentList);
+                    }
+                    componentList.Add(component);
+                }
+                else
+                {
+                    if (m_sessionComponentsForUpdate.TryGetValue(1 << i, out componentList))
+                    {
+                        componentList.Remove(component);
+                    }
                 }
             }
         }

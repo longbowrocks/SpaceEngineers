@@ -17,7 +17,9 @@ using VRage.Serialization;
 using PlayerId = Sandbox.Game.World.MyPlayer.PlayerId;
 
 using Sandbox.Definitions;
+#if !XB1
 using System.Text.RegularExpressions;
+#endif // !XB1
 using VRageMath;
 using Sandbox.Engine.Networking;
 using Sandbox.Game.Gui;
@@ -530,6 +532,9 @@ namespace Sandbox.Game.Multiplayer
         //parses input string, searches for only one valid coords
         public static bool ParseOneGPS(string input ,StringBuilder name, ref Vector3D coords)
         {
+#if XB1
+            System.Diagnostics.Debug.Assert(false, "TODO for XB1.");
+#else // !XB1
             foreach (Match match in Regex.Matches(input, m_ScanPattern))
             {
                 double x, y, z;
@@ -551,6 +556,44 @@ namespace Sandbox.Game.Multiplayer
                 coords.X = x; coords.Y = y; coords.Z = z;
                 return true;
             }
+#endif // !XB1
+            return false;
+        }
+
+        //parses input string, searches for only one valid coords
+        public static bool ParseOneGPSExtended(string input, StringBuilder name, ref Vector3D coords, StringBuilder additionalData)
+        {
+#if XB1
+            System.Diagnostics.Debug.Assert(false, "TODO for XB1.");
+#else // !XB1
+            foreach (Match match in Regex.Matches(input, m_ScanPatternExtended))
+            {
+                double x, y, z;
+                try
+                {
+                    x = double.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    x = Math.Round(x, 2);
+                    y = double.Parse(match.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    y = Math.Round(y, 2);
+                    z = double.Parse(match.Groups[4].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    z = Math.Round(z, 2);
+                }
+                catch (SystemException)
+                {
+                    continue;//search for next GPS in the input
+                }
+                //parsed successfully
+                name.Clear().Append(match.Groups[1].Value);
+                coords.X = x; coords.Y = y; coords.Z = z;
+
+                additionalData.Clear();
+
+                if (match.Groups.Count == 6 && !string.IsNullOrWhiteSpace(match.Groups[5].Value))
+                    additionalData.Append(match.Groups[5].Value);
+
+                return true;
+            }
+#endif // !XB1
             return false;
         }
         
@@ -564,9 +607,13 @@ namespace Sandbox.Game.Multiplayer
         }
         private static readonly int PARSE_MAX_COUNT = 20;
         private static readonly string m_ScanPattern = @"GPS:([^:]{0,32}):([\d\.-]*):([\d\.-]*):([\d\.-]*):";
+        private static readonly string m_ScanPatternExtended = @"GPS:([^:]{0,32}):([\d\.-]*):([\d\.-]*):([\d\.-]*):(.*)";
         public int ScanText(string input, string desc = null)
         {//scans given text and adds all as uncorfirmed
             int count = 0;
+#if XB1
+            System.Diagnostics.Debug.Assert(false, "TODO for XB1.");
+#else // !XB1
             // GPS:name without doublecolons:123.4:234.5:3421.6:
             foreach (Match match in Regex.Matches(input, m_ScanPattern))
             {
@@ -599,6 +646,7 @@ namespace Sandbox.Game.Multiplayer
                 if (count == PARSE_MAX_COUNT)
                     break;
             }
+#endif // !XB1
 
             return count;
         }
